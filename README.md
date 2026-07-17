@@ -1,6 +1,12 @@
 # latch
 
+[![PyPI version](https://img.shields.io/pypi/v/latch-idempotent.svg)](https://pypi.org/project/latch-idempotent/)
+[![Python versions](https://img.shields.io/pypi/pyversions/latch-idempotent.svg)](https://pypi.org/project/latch-idempotent/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 Idempotency middleware for LLM agent tool calls. Prevents duplicate side effects (double-charged orders, duplicate emails, duplicate records) when an agent retries a tool call after a timeout or transient failure.
+
+Zero required dependencies. Works with sync and async functions. Drop it into any agent framework — OpenAI tool calling, LangChain, or your own orchestration loop.
 
 ## The problem
 
@@ -33,6 +39,8 @@ assert result == result_again
 
 Works the same way for `async def` tool functions.
 
+See [`examples/`](examples/) for a plain-function example and an OpenAI-tool-call-shaped example.
+
 ## How it works
 
 - `idempotency_key` is a required keyword argument — `latch` never guesses or auto-generates one. The caller (your agent framework or orchestration code) decides what constitutes "the same logical operation."
@@ -56,9 +64,19 @@ def send_email(to: str) -> dict:
 
 Redis backend is planned for v0.2 (`pip install latch-idempotent[redis]`).
 
-## Status
+## Roadmap
 
-v0.1 — idempotency only. See `CLAUDE.md` for the roadmap (circuit breaker, budget guardrails, saga/compensation, and framework adapters are planned for later versions).
+- [x] **v0.1** — Idempotency core, in-memory store, sync + async support (shipped)
+- [ ] **v0.2** — Circuit breaker, timeout/cancellation propagation, budget guardrails, Redis store
+- [ ] **v0.3** — Saga/compensation pattern, OpenAI + LangChain adapter modules
+- [ ] **v0.4** — Chaos-injection benchmark harness, example agents, tracing hooks
+- [ ] **v1.0** — Docs site, public launch, companion paper
+
+Full design notes and phase-by-phase plan are in [`CLAUDE.md`](CLAUDE.md).
+
+## Contributing
+
+Issues and PRs welcome. Before opening a PR: run `pytest`, `ruff check src tests`, and `mypy src/latch` — all three should pass clean. See `CLAUDE.md` for architecture principles and non-negotiables (no silent error swallowing, no auto-generated idempotency keys, zero required core dependencies).
 
 ## Prior art
 
