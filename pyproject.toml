@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "latch-idempotent"
-version = "0.1.0"
-description = "Idempotency middleware for LLM agent tool calls — prevent duplicate side effects on retry."
+version = "0.2.0"
+description = "Reliability middleware for LLM agent tool calls — idempotency, circuit breaking, timeouts, and budget guardrails."
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
@@ -26,11 +26,11 @@ dependencies = []
 
 [project.optional-dependencies]
 redis = ["redis>=5.0"]
-dev = ["pytest>=7.0", "pytest-asyncio>=0.23", "mypy>=1.8", "ruff>=0.4"]
+dev = ["pytest>=7.0", "pytest-asyncio>=0.23", "mypy>=1.8", "ruff>=0.4", "fakeredis>=2.20"]
 
 [project.urls]
-Homepage = "https://github.com/YOUR_USERNAME/latch"
-Issues = "https://github.com/YOUR_USERNAME/latch/issues"
+Homepage = "https://github.com/sangaraju1988/latch"
+Issues = "https://github.com/sangaraju1988/latch/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/latch"]

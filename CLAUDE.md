@@ -1,10 +1,10 @@
-# latch — Idempotency Middleware for LLM Agent Tool Calls
+# latch — Reliability Middleware for LLM Agent Tool Calls
 
 This file is the persistent context for Claude Code working in this repo. Read it fully before making changes. Keep it updated as phases complete.
 
 ## Mission
 
-`latch` is a small, dependency-free Python library that makes LLM agent tool calls safe to retry. When an agent's tool call times out or errors, the agent doesn't know whether the underlying action actually completed — retrying blindly can double-charge a card, send a duplicate email, or create a duplicate order. `latch` prevents that: wrap a tool function with `@idempotent`, pass a unique `idempotency_key` per logical operation, and repeated calls with the same key return the cached result instead of re-executing.
+`latch` is a small Python library (zero required dependencies in the core) that makes LLM agent tool calls safe to retry and hard to run away with. When an agent's tool call times out or errors, the agent doesn't know whether the underlying action actually completed — retrying blindly can double-charge a card, send a duplicate email, or create a duplicate order. Beyond that, an autonomous agent loop can also hammer an already-failing dependency, block indefinitely on a hung call, or blow through a cost budget. `latch` addresses all four with independent, composable decorators: `@idempotent` (dedupe retries), `@circuit_breaker` (fail fast against a known-down dependency), `@with_timeout` (bound call duration), and `@budget_guardrail` (cap call count/cost per window).
 
 ## Why this exists (prior art — be honest about it)
 
@@ -16,9 +16,34 @@ This is not an unclaimed idea. Before building, we searched and found:
 
 **The gap we're actually filling:** nobody has shipped the practical, pip-installable version of this pattern. The contribution of v0.1 is execution and adoptability, not novelty of the underlying idea. Don't oversell originality in the README or paper — cite the above as prior art and position `latch` as "the missing implementation," not "the first to think of this."
 
+## Packaging decision (v0.2)
+
+**Decision: v0.2 ships inside the same package (`latch-idempotent`), not a new one.**
+
+Rationale:
+- v0.2's four primitives (idempotency, circuit breaker, timeout, budget guardrail) are independent but share one thesis — "reliability middleware for LLM agent tool calls" — and one architecture (decorator + pluggable backend). Splitting into separate packages would fragment that thesis across repos for no technical reason.
+- For the EB1A original-contribution narrative, one package with a continuous version history, a growing star/download/citation trail, and a single canonical name to cite is stronger evidence of sustained original contribution than several disconnected v0.x packages that each look like an abandoned experiment next to the others.
+- The v0.1 CLAUDE.md roadmap already committed to this: v0.2 was scoped as "circuit breaker, timeout/cancellation, budget guardrails, Redis store" as part of *this* project's 90-day plan, not as a new project.
+- Precedent: comparable resilience libraries (`tenacity`, `pybreaker`, `resilience4j` in the JVM world) ship all their primitives from one package with one identity.
+- The one genuinely optional piece (Redis) is handled via `pip install latch-idempotent[redis]` — an extra, not a separate package — so "core stays dependency-free" is preserved without a package split.
+
+A new package would only make sense for a future phase needing a fundamentally different distribution model (e.g. a framework adapter that pulls in LangChain/OpenAI SDKs as hard dependencies) — which is why v0.3's adapters are scoped as documented examples, not a dependency of the core package, and a real adapter package is explicitly deferred.
+
 ## Scope
 
-### v0.1 (current phase — idempotency only)
+### v0.2 (shipped 2026-07-19 — resilience primitives)
+- `@circuit_breaker` / `CircuitBreaker` (`latch.circuit_breaker`) — closed/open/half-open state machine, sync + async, shareable across call sites via a passed-in `CircuitBreaker` instance
+- `@with_timeout` (`latch.timeout`) — wall-clock deadline enforcement; `asyncio.wait_for` for async, daemon-thread bound for sync (documented non-forcible-kill tradeoff — Python cannot safely kill a running thread)
+- `@budget_guardrail` / `BudgetGuardrail` (`latch.budget`) — call-count and/or cost cap per fixed window, optional per-call `cost_fn` for variable pricing
+- `RedisStore` (`latch.stores.redis`) — optional-dependency `IdempotencyStore` backend, lazy-imports `redis` so core stays dependency-free
+- New exceptions: `CircuitOpenError`, `LatchTimeoutError`, `BudgetExceededError`
+- `examples/resilient_tool_example.py` — composes all four primitives on one function
+- 45 tests total (7 v0.1 + 38 new): state transitions, half-open recovery, TTL/window expiry, construction-time validation, missing-optional-dependency error path (via `fakeredis`, no live Redis needed)
+- `ruff` clean, `mypy --strict` clean, package builds and installs cleanly
+
+See `CHANGELOG.md` for full detail.
+
+### v0.1 (idempotency only — shipped)
 - `@idempotent` decorator for sync and async functions
 - Pluggable `IdempotencyStore` interface
 - `InMemoryStore` (default, thread-safe, TTL-based expiry)
@@ -26,28 +51,25 @@ This is not an unclaimed idea. Before building, we searched and found:
 - Tests for sync, async, cache-hit, cache-miss, missing-key error, and TTL expiry
 - One usage example for a plain function and one for an OpenAI-style tool call
 
-### Explicit non-goals for v0.1 (do not build yet)
-- Circuit breaker (v0.2)
-- Timeout/cancellation propagation (v0.2)
-- Budget/cost guardrails (v0.2)
+### Explicit non-goals for v0.2 (do not build yet)
 - Saga/compensation (v0.3)
 - Framework adapters beyond a documented example (v0.3 — real adapter package)
-- Redis store (stub the interface only; implement in v0.2 as an optional extra)
 - Distributed tracing/observability (v0.4)
+- Combining the four v0.2 primitives into a single "one decorator to rule them all" convenience wrapper — keep them independently composable (see `examples/resilient_tool_example.py` for the recommended stacking pattern) rather than adding a fifth abstraction on top
 
-Resist scope creep. Ship v0.1 narrow and solid before touching v0.2.
+Resist scope creep. v0.3 (Saga/compensation, real adapters) starts only after v0.2 is tagged and published, same discipline as v0.1 → v0.2.
 
 ## Roadmap (from the 90-day plan)
 
 - [x] v0.1 — Idempotency core + in-memory store + tests + docs
-- [ ] v0.2 — Circuit breaker, timeout/cancellation, budget guardrails, Redis store
+- [x] v0.2 — Circuit breaker, timeout/cancellation, budget guardrails, Redis store
 - [ ] v0.3 — Saga/compensation pattern, real OpenAI + LangChain adapter modules
 - [ ] v0.4 — Chaos-injection benchmark harness, example agents (before/after), tracing hooks
 - [ ] v1.0 — Docs site, public launch, paper submitted to arXiv
 
 Update the checkboxes above as phases land.
 
-## API design (already decided — implement to this contract)
+## API design (idempotency contract — already decided, implemented in v0.1; the v0.2 primitives follow the same decorator-factory shape, see Architecture principles below)
 
 ```python
 from latch import idempotent, InMemoryStore
@@ -73,11 +95,12 @@ Key behaviors:
 
 ## Architecture principles
 
-- Core has zero required dependencies — anyone can `pip install` it without dragging in redis/httpx/etc.
+- Core has zero required dependencies — anyone can `pip install` it without dragging in redis/httpx/etc. `RedisStore` enforces this by lazily importing `redis` inside `__init__`, not at module load time.
 - `IdempotencyStore` is an abstract interface (`get`, `set`, `exists`) so storage backends are swappable.
-- Every public function is type-hinted; run `mypy` clean.
-- Every behavior has a test before being considered done — no untested code paths in `core.py`.
-- Keep files small and single-purpose (`core.py`, `stores/memory.py`, `exceptions.py` — don't merge concerns).
+- Every public function is type-hinted; run `mypy --strict` clean.
+- Every behavior has a test before being considered done — no untested code paths in any module under `src/latch/`.
+- Keep files small and single-purpose (`core.py`, `circuit_breaker.py`, `timeout.py`, `budget.py`, `stores/memory.py`, `stores/redis.py`, `exceptions.py` — don't merge concerns).
+- v0.2 primitives (`circuit_breaker`, `with_timeout`, `budget_guardrail`) each follow the same shape as `idempotent`: a decorator factory that optionally accepts a pre-built, shareable stateful object (`CircuitBreaker`, `BudgetGuardrail`) so callers can share state across multiple decorated functions, or let the decorator build a private one. Keep new primitives consistent with this shape rather than inventing a new configuration style per module.
 
 ## Conventions
 
@@ -86,7 +109,7 @@ Key behaviors:
 - Every new feature: implementation + tests + README update in the same commit/PR.
 - Run `pytest` before considering any task complete.
 
-## Definition of done for v0.1
+## Definition of done for v0.1 (met)
 
 1. `pytest` passes with tests covering: sync dedup, async dedup, different-key re-execution, missing-key error, TTL expiry.
 2. `mypy src/latch` is clean.
@@ -94,15 +117,25 @@ Key behaviors:
 4. Package builds (`python -m build`) and is ready to publish to PyPI (actual publish is a manual step — don't automate credentials).
 5. `examples/openai_example.py` shows the decorator wrapping an OpenAI-style tool function.
 
-## Immediate next tasks (work through in order)
+## Definition of done for v0.2 (met)
 
-1. Verify the scaffolded code in `src/latch/` builds and `pytest` passes as-is.
-2. Add TTL-expiry test (not yet covered by the scaffold — see `tests/test_core.py` TODO).
-3. Write `examples/openai_example.py`.
-4. Set up `ruff` + `mypy` config and run them clean.
-5. Set up GitHub Actions CI (test + lint on push).
-6. Once v0.1 is solid: write the launch README section, tag `v0.1.0`, publish to PyPI, post on GitHub.
-7. Only then move to v0.2 (circuit breaker) — do not start v0.2 work before v0.1 is tagged and published.
+1. `pytest` passes with all v0.1 tests plus new coverage for circuit breaker (state transitions, half-open recovery/reopen, unexpected-exception-type passthrough), timeout (sync + async deadline exceeded/not-exceeded, exception passthrough), budget guardrail (call-count cap, cost cap, window reset, `cost_fn`), and Redis store (roundtrip, TTL via native Redis expiry, key-prefix isolation, missing-optional-dependency error). 45 tests total.
+2. `mypy --strict src/latch` is clean (verify with a pinned stable mypy — see note below).
+3. README documents all four primitives with copy-pasteable examples, plus the "how they compose" table.
+4. Package builds (`python -m build`) and installs cleanly; `import latch` requires no optional dependencies; `RedisStore()` gives a clear `ImportError` pointing at the `[redis]` extra if `redis` isn't installed.
+5. `examples/resilient_tool_example.py` shows all four primitives stacked on one function.
+6. `CHANGELOG.md` documents the release.
+
+**mypy environment note:** the latest mypy (2.3.0 as of this writing) hit an unrelated internal error in this dev environment; pinning `mypy==1.13.0` runs clean. If CI or a contributor's mypy throws an `INTERNAL ERROR` unrelated to this codebase, try a pinned stable version before assuming the code is at fault.
+
+## Immediate next tasks (v0.3 — work through in order)
+
+v0.2 is code-complete, tested, and documented as of 2026-07-19. Before starting v0.3:
+
+1. Tag `v0.2.0` and push. Confirm CI passes on the actual GitHub Actions matrix (3.9–3.12), not just the local dev environment.
+2. Publish `0.2.0` to PyPI (manual step — do not automate credentials).
+3. Update the companion article/paper draft (`latch-article.docx`) to cover the v0.2 primitives and the "why one package, not four" packaging rationale above — this is EB1A-relevant evidence of a coherent, sustained contribution, not four unrelated tools.
+4. Only then start v0.3 (Saga/compensation pattern, real OpenAI + LangChain adapter modules) — do not start v0.3 work before v0.2 is tagged and published, same discipline that gated v0.2 behind v0.1.
 
 ## Non-negotiables
 
