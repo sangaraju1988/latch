@@ -4,7 +4,7 @@ This file is the persistent context for Claude Code working in this repo. Read i
 
 ## Mission
 
-`latch` is a small Python library (zero required dependencies in the core) that makes LLM agent tool calls safe to retry and hard to run away with. When an agent's tool call times out or errors, the agent doesn't know whether the underlying action actually completed — retrying blindly can double-charge a card, send a duplicate email, or create a duplicate order. Beyond that, an autonomous agent loop can also hammer an already-failing dependency, block indefinitely on a hung call, or blow through a cost budget. `latch` addresses all four with independent, composable decorators: `@idempotent` (dedupe retries), `@circuit_breaker` (fail fast against a known-down dependency), `@with_timeout` (bound call duration), and `@budget_guardrail` (cap call count/cost per window).
+`latch` is a small Python library (zero required dependencies in the core) that makes LLM agent tool calls safe to retry and hard to run away with. When an agent's tool call times out or errors, the agent doesn't know whether the underlying action actually completed — retrying blindly can double-charge a card, send a duplicate email, or create a duplicate order. Beyond that, an autonomous agent loop can also hammer an already-failing dependency, block indefinitely on a hung call, blow through a cost budget, or fail partway through a multi-step operation and leave real side effects with nothing to undo them. `latch` addresses all five with independent, composable primitives: `@idempotent` (dedupe retries), `@circuit_breaker` (fail fast against a known-down dependency), `@with_timeout` (bound call duration), `@budget_guardrail` (cap call count/cost per window), and `Saga` (compensate a multi-step sequence when a later step fails). `latch.adapters` layers framework-specific glue (OpenAI tool calling, LangChain) on top without making those SDKs hard dependencies of the core.
 
 ## Why this exists (prior art — be honest about it)
 
@@ -29,7 +29,29 @@ Rationale:
 
 A new package would only make sense for a future phase needing a fundamentally different distribution model (e.g. a framework adapter that pulls in LangChain/OpenAI SDKs as hard dependencies) — which is why v0.3's adapters are scoped as documented examples, not a dependency of the core package, and a real adapter package is explicitly deferred.
 
+## Packaging decision (v0.3 adapters)
+
+**Decision: `latch.adapters.openai` and `latch.adapters.langchain` ship as real, tested modules inside `latch-idempotent` — not inline doc snippets, and not a separate `latch-langchain`/`latch-openai` package.**
+
+This looks like it contradicts the v0.2 packaging note above ("v0.3's adapters are scoped as documented examples... a real adapter package is explicitly deferred"), so the reconciliation is worth spelling out:
+
+- The "documented example, not a dependency of the core package" framing was about avoiding a **hard dependency** on `openai`/`langchain`, not about avoiding real, importable, tested code. Both adapter modules achieve zero hard dependency by operating on duck-typed shapes (`tool_call.id` / `.function.name` / `.function.arguments` for OpenAI; a plain callable for LangChain) instead of importing the SDK types — the same trick `RedisStore` uses for `redis`, just without even needing a lazy `import` since no SDK object needs to be constructed by `latch` itself.
+- Because neither module imports its target framework, there's no technical reason to fragment them into separate packages the way there would be if, say, `latch.adapters.langchain` needed to subclass `langchain_core.tools.BaseTool` (which would require `langchain-core` at import time). That fundamentally-different-distribution-model trigger from the v0.2 decision above hasn't been hit — so the same "one package, one identity, one EB1A-citable trail" reasoning from the v0.2 packaging decision applies again here.
+- A **real standalone adapter package** (e.g. one that provides its own `BaseTool` subclasses, or auto-registers with an agent framework's plugin system) is still explicitly deferred — that's the "fundamentally different distribution model" case, and nothing in v0.3 needed it.
+- `langchain-core` was added to the `dev` extra (not `dependencies`, not even a new `langchain` extra) purely so the optional integration test/example can exercise a real `StructuredTool` in CI; end users installing `latch-idempotent` never pull it in.
+
 ## Scope
+
+### v0.3 (shipped 2026-07-20 — saga/compensation + framework adapters)
+- `Saga` / `SagaStep` (`latch.saga`) — ordered multi-step execution with automatic reverse-order compensation on failure; sync (`run()`) and async (`run_async()`, mixed sync/async steps) support; imperative (`add_step`) and decorator (`@saga.step`) registration
+- `SagaExecutionError` — carries `step_name`, `original_exception` (also set as `__cause__`), `compensated_steps`, `compensation_errors` (compensation failures are collected, never swallowed, and don't stop the rest of rollback from being attempted)
+- `latch.adapters.openai.dispatch_tool_call` — OpenAI tool-call dispatch + idempotency-key derivation + response formatting, duck-typed against `tool_call.id`/`.function.name`/`.function.arguments`, zero hard dependency on `openai`
+- `latch.adapters.langchain.resilient_tool` — composes the four single-call primitives onto a plain function for `StructuredTool.from_function`; patches `__signature__`/`__annotations__` so LangChain's pydantic-based schema inference doesn't silently drop `idempotency_key` (a real integration bug caught by testing against actual `langchain_core`, not assumed away) — zero hard dependency on `langchain`/`langchain_core`
+- `examples/saga_example.py`, `examples/openai_adapter_example.py`, `examples/langchain_adapter_example.py`
+- 26 new tests (15 saga, 11 adapters — including a real `langchain_core.tools.StructuredTool` integration test, not a mock) on top of the 45 from v0.1+v0.2. 71 total.
+- `ruff` clean, `mypy --strict` clean, package builds and installs cleanly
+
+See `CHANGELOG.md` for full detail.
 
 ### v0.2 (shipped 2026-07-19 — resilience primitives)
 - `@circuit_breaker` / `CircuitBreaker` (`latch.circuit_breaker`) — closed/open/half-open state machine, sync + async, shareable across call sites via a passed-in `CircuitBreaker` instance
@@ -51,25 +73,32 @@ See `CHANGELOG.md` for full detail.
 - Tests for sync, async, cache-hit, cache-miss, missing-key error, and TTL expiry
 - One usage example for a plain function and one for an OpenAI-style tool call
 
-### Explicit non-goals for v0.2 (do not build yet)
-- Saga/compensation (v0.3)
-- Framework adapters beyond a documented example (v0.3 — real adapter package)
+### Explicit non-goals for v0.3 (do not build yet)
+- A standalone `latch-langchain` / `latch-openai` adapter package with hard SDK dependencies (see "Packaging decision (v0.3 adapters)" above) — deferred until an adapter genuinely needs one
+- Adapters for other frameworks (CrewAI, AutoGen, Semantic Kernel, etc.) — add only on real demand, not speculatively
+- Parallel/fan-out saga steps, nested sagas, or saga persistence/replay across process restarts — v0.3's `Saga` is in-process and sequential only; that covers the common case and keeps the abstraction small
+- Distributed tracing/observability (still v0.4)
+- Chaos-injection benchmark harness, example agents (still v0.4)
+
+### Explicit non-goals for v0.2 (met — kept for history)
+- Saga/compensation (v0.3 — done)
+- Framework adapters beyond a documented example (v0.3 — done, see reconciliation in "Packaging decision (v0.3 adapters)")
 - Distributed tracing/observability (v0.4)
 - Combining the four v0.2 primitives into a single "one decorator to rule them all" convenience wrapper — keep them independently composable (see `examples/resilient_tool_example.py` for the recommended stacking pattern) rather than adding a fifth abstraction on top
 
-Resist scope creep. v0.3 (Saga/compensation, real adapters) starts only after v0.2 is tagged and published, same discipline as v0.1 → v0.2.
+Resist scope creep. v0.4 (chaos-injection benchmark harness, example agents, tracing hooks) starts only after v0.3 is tagged and published, same discipline that gated v0.3 behind v0.2 and v0.2 behind v0.1.
 
 ## Roadmap (from the 90-day plan)
 
 - [x] v0.1 — Idempotency core + in-memory store + tests + docs
 - [x] v0.2 — Circuit breaker, timeout/cancellation, budget guardrails, Redis store
-- [ ] v0.3 — Saga/compensation pattern, real OpenAI + LangChain adapter modules
+- [x] v0.3 — Saga/compensation pattern, real OpenAI + LangChain adapter modules
 - [ ] v0.4 — Chaos-injection benchmark harness, example agents (before/after), tracing hooks
 - [ ] v1.0 — Docs site, public launch, paper submitted to arXiv
 
 Update the checkboxes above as phases land.
 
-## API design (idempotency contract — already decided, implemented in v0.1; the v0.2 primitives follow the same decorator-factory shape, see Architecture principles below)
+## API design (idempotency contract — already decided, implemented in v0.1; the v0.2 primitives follow the same decorator-factory shape; `Saga` (v0.3) intentionally does not — see Architecture principles below)
 
 ```python
 from latch import idempotent, InMemoryStore
@@ -99,8 +128,10 @@ Key behaviors:
 - `IdempotencyStore` is an abstract interface (`get`, `set`, `exists`) so storage backends are swappable.
 - Every public function is type-hinted; run `mypy --strict` clean.
 - Every behavior has a test before being considered done — no untested code paths in any module under `src/latch/`.
-- Keep files small and single-purpose (`core.py`, `circuit_breaker.py`, `timeout.py`, `budget.py`, `stores/memory.py`, `stores/redis.py`, `exceptions.py` — don't merge concerns).
-- v0.2 primitives (`circuit_breaker`, `with_timeout`, `budget_guardrail`) each follow the same shape as `idempotent`: a decorator factory that optionally accepts a pre-built, shareable stateful object (`CircuitBreaker`, `BudgetGuardrail`) so callers can share state across multiple decorated functions, or let the decorator build a private one. Keep new primitives consistent with this shape rather than inventing a new configuration style per module.
+- Keep files small and single-purpose (`core.py`, `circuit_breaker.py`, `timeout.py`, `budget.py`, `saga.py`, `stores/memory.py`, `stores/redis.py`, `exceptions.py`, `adapters/openai.py`, `adapters/langchain.py` — don't merge concerns).
+- v0.2 primitives (`circuit_breaker`, `with_timeout`, `budget_guardrail`) each follow the same shape as `idempotent`: a decorator factory that optionally accepts a pre-built, shareable stateful object (`CircuitBreaker`, `BudgetGuardrail`) so callers can share state across multiple decorated functions, or let the decorator build a private one. Keep new *single-call* primitives consistent with this shape rather than inventing a new configuration style per module.
+- `Saga` (v0.3) intentionally does NOT follow the decorator-factory shape — it orchestrates a *sequence* of calls, not one call, so it's a builder object (`add_step`/`step` to register, `run`/`run_async` to execute) instead. Don't force multi-step orchestration into the single-call decorator shape; don't force single-call primitives into the builder shape either. Pick the shape that matches what's being protected.
+- Adapter modules (`latch.adapters.*`) never import their target framework's SDK at module scope — they operate on duck-typed shapes (a callable, an object with the attributes the SDK's real objects have) so `import latch` and `import latch.adapters.<x>` both stay dependency-free. This is a harder constraint than `RedisStore`'s lazy-import-in-`__init__` pattern (adapters don't even need a lazy import, since they never construct an SDK object themselves) — keep it that way rather than reaching for `TYPE_CHECKING`-gated real imports the first time it'd be convenient.
 
 ## Conventions
 
@@ -128,14 +159,23 @@ Key behaviors:
 
 **mypy environment note:** the latest mypy (2.3.0 as of this writing) hit an unrelated internal error in this dev environment; pinning `mypy==1.13.0` runs clean. If CI or a contributor's mypy throws an `INTERNAL ERROR` unrelated to this codebase, try a pinned stable version before assuming the code is at fault.
 
-## Immediate next tasks (v0.3 — work through in order)
+## Definition of done for v0.3 (met)
 
-v0.2 is code-complete, tested, and documented as of 2026-07-19. Before starting v0.3:
+1. `pytest` passes with all v0.1+v0.2 tests plus new coverage for `Saga` (all-succeed, mid-failure reverse-order rollback, no-compensation steps, compensation failure captured-not-swallowed with rollback continuing, empty saga, decorator registration, sync-rejects-async with a clear `TypeError`, async execution with mixed sync/async steps, error message/chaining) and both adapters (OpenAI dispatch happy path/unknown-tool/exception-propagation/`run_id` prefixing/opt-out flag, LangChain wrapping with zero/one/all layers, and — not mocked — a real `langchain_core.tools.StructuredTool` built and invoked, including the full-stack `idempotency_key` schema-inference regression test). 71 tests total.
+2. `mypy --strict src/latch` clean (same pinned-mypy caveat as v0.2).
+3. README documents `Saga` and both adapters with copy-pasteable examples; roadmap checklist updated.
+4. Package builds and installs cleanly; `import latch` and `import latch.adapters.openai`/`import latch.adapters.langchain` all require no optional dependencies.
+5. `examples/saga_example.py` (success + rollback walkthrough), `examples/openai_adapter_example.py`, `examples/langchain_adapter_example.py` (builds and invokes a real `StructuredTool`) all run standalone and were actually executed, not just written.
+6. `CHANGELOG.md` documents the release.
 
-1. Tag `v0.2.0` and push. Confirm CI passes on the actual GitHub Actions matrix (3.9–3.12), not just the local dev environment.
-2. Publish `0.2.0` to PyPI (manual step — do not automate credentials).
-3. Update the companion article/paper draft (`latch-article.docx`) to cover the v0.2 primitives and the "why one package, not four" packaging rationale above — this is EB1A-relevant evidence of a coherent, sustained contribution, not four unrelated tools.
-4. Only then start v0.3 (Saga/compensation pattern, real OpenAI + LangChain adapter modules) — do not start v0.3 work before v0.2 is tagged and published, same discipline that gated v0.2 behind v0.1.
+## Immediate next tasks (v0.4 — work through in order)
+
+v0.3 is code-complete, tested, and documented as of 2026-07-20. Before starting v0.4:
+
+1. Tag `v0.3.0` and push. Confirm CI passes on the actual GitHub Actions matrix (3.9–3.12), not just the local dev environment.
+2. Publish `0.3.0` to PyPI (manual step — do not automate credentials).
+3. **Outstanding from the v0.2 cycle, still not done:** update the companion article/paper draft (`latch-article.docx`, last touched 2026-07-17 — predates both v0.2 and v0.3) to cover the v0.2 primitives, the v0.3 saga/adapters work, and both packaging-decision rationales above. This was supposed to gate the start of v0.3 per the v0.2-era version of this file and didn't happen before v0.3 work started — don't let it slip again before v0.4.
+4. Only then start v0.4 (chaos-injection benchmark harness, example agents, tracing hooks) — do not start v0.4 work before v0.3 is tagged, published, and the article is caught up.
 
 ## Non-negotiables
 

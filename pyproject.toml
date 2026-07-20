@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "latch-idempotent"
-version = "0.2.0"
-description = "Reliability middleware for LLM agent tool calls — idempotency, circuit breaking, timeouts, and budget guardrails."
+version = "0.3.0"
+description = "Reliability middleware for LLM agent tool calls — idempotency, circuit breaking, timeouts, budget guardrails, and saga/compensation."
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
@@ -26,7 +26,14 @@ dependencies = []
 
 [project.optional-dependencies]
 redis = ["redis>=5.0"]
-dev = ["pytest>=7.0", "pytest-asyncio>=0.23", "mypy>=1.8", "ruff>=0.4", "fakeredis>=2.20"]
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.23",
+    "mypy>=1.8",
+    "ruff>=0.4",
+    "fakeredis>=2.20",
+    "langchain-core>=0.3",
+]
 
 [project.urls]
 Homepage = "https://github.com/sangaraju1988/latch"
