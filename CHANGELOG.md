@@ -12,7 +12,7 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `latch.adapters.openai.dispatch_tool_call`: dispatches one OpenAI `tool_calls[i]` entry to a registered tool function, deriving `idempotency_key` from `tool_call.id` (optionally prefixed by `run_id`), and returns an OpenAI-shaped tool response message. Duck-typed — never imports `openai`.
 - `latch.adapters.langchain.resilient_tool`: wraps a plain function with whichever latch primitives are configured (idempotency, circuit breaker, timeout, budget guardrail), ready to hand to `StructuredTool.from_function` or any other LangChain constructor that accepts a callable. Also patches the wrapped function's visible signature/annotations so frameworks that build a call schema via `inspect.signature`/`typing.get_type_hints` (LangChain's pydantic-based schema inference included) see the `idempotency_key` parameter instead of silently dropping it — a real bug caught by the integration test against actual `langchain_core.tools.StructuredTool`, not just a documented example. Never imports `langchain`/`langchain_core`.
 - `examples/saga_example.py`, `examples/openai_adapter_example.py`, `examples/langchain_adapter_example.py`.
-- 26 new tests across `test_saga.py` (rollback ordering, best-effort compensation with captured-not-swallowed errors, sync/async, decorator registration, empty saga, error chaining) and `test_adapters.py` (OpenAI dispatch, LangChain wrapping, and a real `langchain_core.StructuredTool` integration run — no mocking of the target SDK). Full suite: 71 tests.
+- 27 new tests across `test_saga.py` (rollback ordering, best-effort compensation with captured-not-swallowed errors, sync/async, decorator registration, empty saga, error chaining), `test_adapters.py` (OpenAI dispatch, LangChain wrapping, and a real `langchain_core.StructuredTool` integration run — no mocking of the target SDK), and one regression test in `test_redis_store.py` (see Fixed, below). Full suite: 72 tests.
 - `dev` extra now includes `langchain-core`, used only by the optional LangChain integration tests/examples (skipped automatically if not installed).
 
 ### Changed
@@ -22,7 +22,7 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
-- N/A (no bugs in v0.2 code; the `inspect.signature`/`typing.get_type_hints` gap above was caught and fixed within this release, before ever shipping).
+- `RedisStore.get()` (`latch.stores.redis`, pre-existing since v0.2): `mypy --strict` failed on the real Python 3.9 CI matrix — `redis-py`'s type stubs describe `GET`'s return as a broad union shared with the async client, and how far mypy narrows that union through the existing `isinstance(raw, str)` reassignment turned out to differ between mypy/redis-py stub versions resolved on 3.9 vs 3.10–3.12, even with the same source and the same `pyproject.toml` `python_version = "3.10"` mypy config. Fixed with an explicit `isinstance(raw, (bytes, bytearray))` check before `pickle.loads` — also a legitimate runtime safety improvement (an unexpected response shape now fails loudly with a clear `TypeError` instead of a confusing error from inside `pickle`). This bug shipped in 0.2.0 and was only caught now because 0.2.0 was never actually run against the full GitHub Actions matrix before being tagged and published — see the "Immediate next tasks" note in `CLAUDE.md`.
 
 ## [0.2.0] — 2026-07-19
 

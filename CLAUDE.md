@@ -48,7 +48,8 @@ This looks like it contradicts the v0.2 packaging note above ("v0.3's adapters a
 - `latch.adapters.openai.dispatch_tool_call` — OpenAI tool-call dispatch + idempotency-key derivation + response formatting, duck-typed against `tool_call.id`/`.function.name`/`.function.arguments`, zero hard dependency on `openai`
 - `latch.adapters.langchain.resilient_tool` — composes the four single-call primitives onto a plain function for `StructuredTool.from_function`; patches `__signature__`/`__annotations__` so LangChain's pydantic-based schema inference doesn't silently drop `idempotency_key` (a real integration bug caught by testing against actual `langchain_core`, not assumed away) — zero hard dependency on `langchain`/`langchain_core`
 - `examples/saga_example.py`, `examples/openai_adapter_example.py`, `examples/langchain_adapter_example.py`
-- 26 new tests (15 saga, 11 adapters — including a real `langchain_core.tools.StructuredTool` integration test, not a mock) on top of the 45 from v0.1+v0.2. 71 total.
+- 27 new tests (15 saga, 11 adapters — including a real `langchain_core.tools.StructuredTool` integration test, not a mock — plus 1 regression test for the `RedisStore` fix below) on top of the 45 from v0.1+v0.2. 72 total.
+- Fixed a pre-existing v0.2 bug in `RedisStore.get()` that only surfaced when CI actually ran on the full GitHub Actions matrix (`mypy --strict` failed on Python 3.9 only — see CHANGELOG for detail). This is why "confirm CI passes on the actual matrix" is a hard gate below, not a formality: it caught something local single-version testing didn't.
 - `ruff` clean, `mypy --strict` clean, package builds and installs cleanly
 
 See `CHANGELOG.md` for full detail.
@@ -161,7 +162,7 @@ Key behaviors:
 
 ## Definition of done for v0.3 (met)
 
-1. `pytest` passes with all v0.1+v0.2 tests plus new coverage for `Saga` (all-succeed, mid-failure reverse-order rollback, no-compensation steps, compensation failure captured-not-swallowed with rollback continuing, empty saga, decorator registration, sync-rejects-async with a clear `TypeError`, async execution with mixed sync/async steps, error message/chaining) and both adapters (OpenAI dispatch happy path/unknown-tool/exception-propagation/`run_id` prefixing/opt-out flag, LangChain wrapping with zero/one/all layers, and — not mocked — a real `langchain_core.tools.StructuredTool` built and invoked, including the full-stack `idempotency_key` schema-inference regression test). 71 tests total.
+1. `pytest` passes with all v0.1+v0.2 tests plus new coverage for `Saga` (all-succeed, mid-failure reverse-order rollback, no-compensation steps, compensation failure captured-not-swallowed with rollback continuing, empty saga, decorator registration, sync-rejects-async with a clear `TypeError`, async execution with mixed sync/async steps, error message/chaining) and both adapters (OpenAI dispatch happy path/unknown-tool/exception-propagation/`run_id` prefixing/opt-out flag, LangChain wrapping with zero/one/all layers, and — not mocked — a real `langchain_core.tools.StructuredTool` built and invoked, including the full-stack `idempotency_key` schema-inference regression test) and a regression test for the `RedisStore.get()` fix (see CHANGELOG). 72 tests total.
 2. `mypy --strict src/latch` clean (same pinned-mypy caveat as v0.2).
 3. README documents `Saga` and both adapters with copy-pasteable examples; roadmap checklist updated.
 4. Package builds and installs cleanly; `import latch` and `import latch.adapters.openai`/`import latch.adapters.langchain` all require no optional dependencies.
@@ -172,7 +173,7 @@ Key behaviors:
 
 v0.3 is code-complete, tested, and documented as of 2026-07-20. Companion article (`latch-article.docx`) was caught up through v0.3 on 2026-07-20 — no longer outstanding. Before starting v0.4:
 
-1. Commit and push to `main`. Confirm CI passes on the actual GitHub Actions matrix (3.9–3.12) — only 3.10 has been verified locally in the dev sandbox; 3.9/3.11/3.12 compatibility was checked statically (`vermin`, `mypy --python-version 3.9`) but never actually executed. Fix anything CI surfaces before tagging.
+1. Push to `main` and confirm CI is green on the actual GitHub Actions matrix (3.9–3.12). Done once already: the first push (commit `ab101bf`) failed on Python 3.9 only — `mypy --strict` caught a real pre-existing bug in `RedisStore.get()` that static local checks (`vermin`, `mypy --python-version 3.9` run by hand) had missed, because the failure came from mypy/redis-py stub *version resolution* differing per interpreter, not from source-level 3.9 incompatibility. Fixed in commit `9639748`. Confirms the CI-gate discipline in this file is load-bearing, not a formality — push the fix and re-check the matrix before tagging.
 2. Tag `v0.3.0` and push the tag.
 3. Publish `0.3.0` to PyPI (manual step — do not automate credentials). Verify with a fresh-venv install of the published (not locally-built) artifact.
 4. Only then start v0.4 (chaos-injection benchmark harness, example agents, tracing hooks) — do not start v0.4 work before v0.3 is tagged and published.
