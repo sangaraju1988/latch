@@ -170,12 +170,12 @@ Key behaviors:
 
 ## Immediate next tasks (v0.4 — work through in order)
 
-v0.3 is code-complete, tested, and documented as of 2026-07-20. Before starting v0.4:
+v0.3 is code-complete, tested, and documented as of 2026-07-20. Companion article (`latch-article.docx`) was caught up through v0.3 on 2026-07-20 — no longer outstanding. Before starting v0.4:
 
-1. Tag `v0.3.0` and push. Confirm CI passes on the actual GitHub Actions matrix (3.9–3.12), not just the local dev environment.
-2. Publish `0.3.0` to PyPI (manual step — do not automate credentials).
-3. **Outstanding from the v0.2 cycle, still not done:** update the companion article/paper draft (`latch-article.docx`, last touched 2026-07-17 — predates both v0.2 and v0.3) to cover the v0.2 primitives, the v0.3 saga/adapters work, and both packaging-decision rationales above. This was supposed to gate the start of v0.3 per the v0.2-era version of this file and didn't happen before v0.3 work started — don't let it slip again before v0.4.
-4. Only then start v0.4 (chaos-injection benchmark harness, example agents, tracing hooks) — do not start v0.4 work before v0.3 is tagged, published, and the article is caught up.
+1. Commit and push to `main`. Confirm CI passes on the actual GitHub Actions matrix (3.9–3.12) — only 3.10 has been verified locally in the dev sandbox; 3.9/3.11/3.12 compatibility was checked statically (`vermin`, `mypy --python-version 3.9`) but never actually executed. Fix anything CI surfaces before tagging.
+2. Tag `v0.3.0` and push the tag.
+3. Publish `0.3.0` to PyPI (manual step — do not automate credentials). Verify with a fresh-venv install of the published (not locally-built) artifact.
+4. Only then start v0.4 (chaos-injection benchmark harness, example agents, tracing hooks) — do not start v0.4 work before v0.3 is tagged and published.
 
 ## Non-negotiables
 
