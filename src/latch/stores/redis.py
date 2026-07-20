@@ -85,6 +85,24 @@ class RedisStore(IdempotencyStore):
             # decode_responses=True, which corrupts pickled bytes; latch
             # writes bytes and expects to read bytes back.
             raw = raw.encode("latin-1")
+        if not isinstance(raw, (bytes, bytearray)):
+            # redis-py's type stubs describe GET's return type as a broad
+            # union (it's shared with the async client), and how far mypy
+            # narrows it through the reassignment above has been observed
+            # to differ across mypy/redis-py stub versions (this surfaced
+            # as a real CI failure on Python 3.9 that didn't reproduce on
+            # 3.10-3.12 with the same source). Narrow explicitly instead
+            # of relying on that inference, which is also a legitimate
+            # runtime safety check: an unexpected type here means either
+            # a misconfigured client or a Redis response shape we don't
+            # support, and that should fail loudly, not get passed to
+            # pickle.loads and produce a confusing error two frames away.
+            raise TypeError(
+                f"Unexpected type from Redis GET for key {key!r}: {type(raw)!r}. "
+                f"Expected bytes/bytearray/str; check the client isn't configured "
+                f"in a way (e.g. a custom response callback) that changes GET's "
+                f"return shape."
+            )
         return pickle.loads(raw)
 
     def set(self, key: str, value: Any, ttl_seconds: int) -> None:

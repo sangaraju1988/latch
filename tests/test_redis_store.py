@@ -71,6 +71,16 @@ def test_idempotent_decorator_works_with_redis_store():
     assert len(calls) == 1
 
 
+def test_get_raises_clear_error_on_unexpected_client_response_type(redis_store, monkeypatch):
+    # Simulates a client whose GET returns something other than
+    # bytes/bytearray/str/None (e.g. a misconfigured response callback) --
+    # should fail loudly rather than hand a surprising type to pickle.loads.
+    monkeypatch.setattr(redis_store._client, "get", lambda _key: 12345)
+
+    with pytest.raises(TypeError, match="Unexpected type from Redis GET"):
+        redis_store.get("k1")
+
+
 def test_missing_redis_package_raises_clear_error(monkeypatch):
     import builtins
 
