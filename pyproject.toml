@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "latch-idempotent"
-version = "0.4.0"
+version = "0.4.1"
 description = "Reliability middleware for LLM agent tool calls — idempotency, circuit breaking, timeouts, budget guardrails, saga/compensation, tracing, and chaos testing."
 readme = "README.md"
 requires-python = ">=3.9"

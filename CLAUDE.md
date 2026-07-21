@@ -42,6 +42,18 @@ This looks like it contradicts the v0.2 packaging note above ("v0.3's adapters a
 
 ## Scope
 
+### v0.4.1 (shipped 2026-07-20 — pre-public-launch reliability audit, patch release)
+Before starting v1.0, ran a full end-to-end readiness audit at the user's explicit request ("make sure this utility is ready for public use and any dev can just import and use it 100%"): fresh-install smoke tests against the real published 0.4.0 PyPI artifact, every README/CLAUDE.md code snippet executed verbatim (not just eyeballed), every `examples/`/`benchmarks/` script actually run, a systematic edge-case pass per primitive, and multi-threaded/asyncio concurrency stress tests — a class of testing the existing 111-test suite didn't cover (it exercises correctness of logic, not behavior under real concurrent load). Found and fixed four real bugs, all silent (no exception, no crash — just wrong behavior or no protection):
+- `@idempotent` never deduped functions returning `None` (`store.get() is not None` can't distinguish "no entry" from "entry is `None`"; `InMemoryStore.exists()` had the same bug one layer down, since it was implemented as `self.get(key) is not None`).
+- Two different `@idempotent`-decorated functions sharing a store (most commonly both landing on the same process-wide default store) could silently return each other's cached results if a caller ever reused an `idempotency_key` across two unrelated operations. Fixed by namespacing the storage key with the wrapped function's identity — invisible to callers, the raw key is still what tracer/`on_duplicate` see.
+- `@idempotent` gave zero protection under true concurrency (only sequential retries) — N threads/tasks racing the same key could all observe a cache miss and all execute the side effect. Fixed with a per-storage-key lock (`threading.RLock` sync / `asyncio.Lock` async) held in a `weakref.WeakValueDictionary` so it doesn't grow unboundedly.
+- `CircuitBreaker` half-open state let unlimited concurrent calls through as "trial" calls simultaneously, contradicting its own docstring ("the next call is let through as a trial") and defeating the point of half-open (limiting exposure while a dependency is barely recovering). Fixed with a single trial slot, carefully released even when the trial raises an exception type outside `expected_exception` (otherwise that path would leave the breaker permanently wedged, since neither `_on_success` nor `_on_failure` runs for an unexpected exception type).
+- `src/latch/py.typed` was missing from the package, so any downstream `mypy`/`pyright` user saw `import-untyped` and lost all real type information (everything resolved to `Any`) despite `latch`'s own source being `mypy --strict` clean. Added; hatchling picks it up automatically from `src/latch/`.
+
+None of these fixes change any documented public API signature — every one corrects behavior that already contradicted its own docstring or README description. 17 new regression tests (multi-threaded and `asyncio.gather`-based, not just single-threaded) added across `test_core.py`, the new `test_stores_memory.py`, `test_redis_store.py`, and `test_circuit_breaker.py`. 128 tests total (up from 111). `ruff` and `mypy --strict src/latch` (both default 3.10 config and explicit `--python-version 3.9`) clean; package builds, and the built wheel was confirmed (not assumed) to contain `py.typed` via a fresh non-editable install plus an actual `mypy --strict` run against downstream code showing real inferred types instead of `Any`.
+
+See `CHANGELOG.md` `[0.4.1]` for full detail.
+
 ### v0.4 (shipped 2026-07-20 — observability + chaos testing)
 - `latch.tracing`: `TraceEvent` (frozen dataclass), `Tracer` (thread-safe pub/sub event bus), `LoggingTracer` (`Tracer` subclass that logs to `logging.getLogger("latch")` at INFO with zero extra wiring). `tracer: Optional[Tracer] = None` added to `idempotent()`, `circuit_breaker()`/`CircuitBreaker.__init__`, `with_timeout()`, `budget_guardrail()`/`BudgetGuardrail.__init__`, and `Saga.__init__` — opt-in, zero overhead when unused.
 - `latch.chaos`: `Chaos` class + `@chaos` decorator, injecting a configurable `failure_rate` and/or `latency_seconds`/`latency_jitter_seconds` into sync or async functions, with a seedable RNG (`seed=`) for reproducible runs. Ships as real, tested library code, not a doc-only snippet.
@@ -111,6 +123,7 @@ Resist scope creep. v1.0 (docs site, public launch, paper submitted to arXiv) st
 - [x] v0.2 — Circuit breaker, timeout/cancellation, budget guardrails, Redis store
 - [x] v0.3 — Saga/compensation pattern, real OpenAI + LangChain adapter modules
 - [x] v0.4 — Tracing/observability hooks, chaos-injection testing utility + benchmark harness, before/after example agents
+- [x] v0.4.1 — Pre-public-launch reliability audit; 4 real bugs found and fixed (see Scope above)
 - [ ] v1.0 — Docs site, public launch, paper submitted to arXiv
 
 Update the checkboxes above as phases land.
@@ -196,15 +209,24 @@ Key behaviors:
 5. `benchmarks/chaos_benchmark.py`, `examples/naive_agent_example.py`, and `examples/resilient_agent_example.py` all run standalone and were actually executed (not just written) — the benchmark was run at two different seeds to confirm the naive-vs-protected gap isn't a seed-specific fluke.
 6. `CHANGELOG.md` documents the release.
 
+## Definition of done for v0.4.1 (met)
+
+1. `pytest` passes with all v0.1–v0.4 tests plus new regression coverage for all four bugs listed under Scope above, including multi-threaded (`threading.Thread`) and `asyncio.gather`-based concurrency tests, not just single-threaded logic assertions — a testing gap the v0.1–v0.4 suite had throughout. 128 tests total.
+2. `mypy --strict src/latch` clean (default 3.10 config and explicit `--python-version 3.9`, same pinned-mypy caveat as prior releases). `py.typed` presence verified concretely, not assumed: built the wheel, installed it (not editable) into a fresh venv, confirmed `latch/py.typed` is physically present in site-packages, and ran `mypy --strict` against a downstream script importing `latch` to confirm it reports real inferred types instead of collapsing to `Any`.
+3. `ruff check`/`ruff format --check` clean.
+4. Package builds (`python -m build`) and both the wheel and sdist pass `twine check`; wheel contents inspected directly (not assumed) to confirm `py.typed` is included and nothing unwanted (tests/examples/benchmarks/`.git`) leaked in.
+5. No documented public API signature changed — confirmed by re-running every README/CLAUDE.md code snippet verbatim against the fixed source and every `examples/`/`benchmarks/` script, all of which still produce the same documented output.
+6. `CHANGELOG.md` documents the release with one entry per bug, explaining what was silently wrong and why the fix doesn't change the documented contract.
+
 ## Immediate next tasks (v1.0 — work through in order)
 
-v0.4 is code-complete, tested, and documented as of 2026-07-20 (111 tests passing, `mypy --strict src/latch` clean, `ruff` clean). Before starting v1.0:
+v0.4.0 was already tagged, published to PyPI, and verified live in a fresh venv. A subsequent end-to-end readiness audit (at the user's explicit request, ahead of public launch) found four real bugs in that already-published release — see the `v0.4.1` Scope entry above — and fixed them locally as of 2026-07-20 (128 tests passing, `mypy --strict src/latch` clean on both 3.10 and 3.9 targets, `ruff` clean, wheel/sdist verified). `v0.4.1` is **not yet pushed, tagged, or published** — same manual-step discipline as every prior release. Before starting v1.0:
 
 1. Push to `main` and confirm CI is green on the actual GitHub Actions matrix (3.9–3.12) — not a formality; this exact gate caught a real pre-existing bug before v0.3 shipped (see `CHANGELOG.md` `[0.3.0]` Fixed section), so don't skip re-checking it here even though local checks were clean this time too.
-2. Tag `v0.4.0` and push the tag.
-3. Publish `0.4.0` to PyPI (manual step — do not automate credentials). Verify with a fresh-venv install of the published (not locally-built) artifact, the same way `0.3.0` was verified.
-4. Update `latch-article.docx` to cover v0.4 (tracing, chaos testing, the benchmark harness's naive-vs-protected numbers are good candidate evaluation data for the companion paper discussed for after v1.0).
-5. Only then start v1.0 (docs site, public launch, paper submitted to arXiv) — do not start v1.0 work before v0.4 is tagged and published, same discipline that has gated every phase so far.
+2. Tag `v0.4.1` and push the tag.
+3. Publish `0.4.1` to PyPI (manual step — do not automate credentials). Verify with a fresh-venv install of the published (not locally-built) artifact, the same way every prior release was verified — this time also confirm `py.typed` is present in the installed package and that `mypy --strict` against downstream code shows real types, since that's the specific thing this release fixed.
+4. Update `latch-article.docx` to cover v0.4 (tracing, chaos testing, the benchmark harness's naive-vs-protected numbers are good candidate evaluation data for the companion paper discussed for after v1.0) if not already done; a brief v0.4.1 mention is optional (it's a reliability/correctness patch, not new user-facing capability) but should stay honest if omitted — don't claim v0.4.0's numbers without noting a race-condition fix landed after they were captured.
+5. Only then start v1.0 (docs site, public launch, paper submitted to arXiv) — do not start v1.0 work before v0.4.1 is tagged and published, same discipline that has gated every phase so far.
 
 ## Non-negotiables
 

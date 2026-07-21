@@ -3,6 +3,26 @@
 All notable changes to this project are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.4.1] — 2026-07-20
+
+A pre-public-launch end-to-end reliability audit (fresh-install smoke tests, every README/CLAUDE.md snippet executed verbatim, every example/benchmark run, a full edge-case pass per primitive, and multi-threaded concurrency stress tests beyond what the existing unit suite exercised) found four real bugs. None of them change any documented public API signature; all four are fixed here rather than just documented as known limitations, because each one silently defeats part of what this library promises to do.
+
+### Fixed
+
+- **`@idempotent` did not dedupe functions that return `None`.** `IdempotencyStore.get()` returns `None` both for "no cached entry" and "cached entry whose value is `None`" — the decorator's `if cached is not None` check couldn't tell those apart, so a fire-and-forget tool function (a delete, a notification with no meaningful return value) was silently never deduped: every retry re-executed the side effect. Fixed in `latch/core.py` by checking `store.exists()` before `store.get()`. `InMemoryStore.exists()` had the identical bug one layer down (it was implemented as `self.get(key) is not None`) and is fixed the same way in `latch/stores/memory.py`; `RedisStore.exists()` was already correct (Redis's native `EXISTS` doesn't care what the value is).
+- **Two different `@idempotent`-decorated functions sharing a store could collide on the same `idempotency_key`.** Most commonly this happened invisibly: any two decorated functions that both left `store=` unset landed on the same process-wide default store, and if a caller ever reused an idempotency key string across two unrelated logical operations (plausible under a `"{run_id}:{step}"`-style scheme), the second function silently got back the *first* function's cached result — wrong data, no error. Fixed by namespacing the storage key with the wrapped function's identity (`func.__module__.func.__qualname__`) in `latch/core.py`; the raw caller-supplied key is unchanged for `on_duplicate`/tracer purposes, so no observable behavior changes for correctly-scoped usage.
+- **`@idempotent` provided no protection under true concurrency, only sequential retries.** The check-then-act sequence (look up the key, and if missing, execute and store) was not atomic — N threads or async tasks calling the same key at the same moment could all observe a cache miss and all execute the wrapped function. Fixed with a per-storage-key lock (`threading.RLock` for sync, `asyncio.Lock` for async) around the whole sequence, held in a `weakref.WeakValueDictionary` so locks for keys no longer in use are reclaimed rather than growing the registry forever. Calls with *different* keys are unaffected and still run in parallel (verified: 10 different-key 0.2s calls complete in ~0.2s total, not ~2s).
+- **`CircuitBreaker` half-open state allowed unlimited concurrent trial calls.** The docstring always said "the next call is let through as a trial" (singular), but nothing enforced that under concurrency — every caller queued up while the circuit was `OPEN` would arrive the instant `recovery_timeout` elapsed and all get let through simultaneously as "trial" calls, hammering a dependency that had barely started recovering (the exact failure mode a circuit breaker exists to prevent). Fixed with a single half-open trial slot, released on success, expected-exception failure, *or* an exception type outside `expected_exception` (the last case needed explicit handling in `call()`/`call_async()` — otherwise an unrelated bug in the wrapped function during the trial would leave the slot permanently held and wedge the breaker rejecting forever).
+- **No `py.typed` marker shipped in the package.** `src/latch/py.typed` was missing, so `mypy`/`pyright` treat an installed `latch` as untyped (`import-untyped`) and every value flowing through it collapses to `Any` for downstream consumers — silently defeating the value of `latch` itself being `mypy --strict` clean internally. Added the marker; hatchling picks it up automatically since it lives inside `src/latch/` (confirmed present in both the built wheel and a fresh non-editable install, and confirmed `mypy --strict` against downstream code now reports real inferred types instead of `Any`).
+
+### Added
+
+- 17 new regression tests covering all four fixes above (`test_core.py`, `test_stores_memory.py` — new file, direct `InMemoryStore` unit tests — and `test_redis_store.py`, `test_circuit_breaker.py`), including multi-threaded and `asyncio.gather`-based concurrency tests, not just single-threaded logic tests. 128 tests total (up from 111).
+
+### Changed
+
+- Nothing in the documented public API changed. Every fix above corrects behavior that already contradicted its own docstring/README description; no decorator signature, parameter, or return shape changed.
+
 ## [0.4.0] — 2026-07-20
 
 ### Added

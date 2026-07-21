@@ -232,6 +232,8 @@ Same injected latency, same client-timeout-and-retry loop shape — the only dif
 - On first call with a given key, the function executes and the result is cached.
 - On any subsequent call with the same key, within the TTL window (default 24h), the cached result is returned and the function is not re-executed.
 - If the wrapped function raises, nothing is cached — the exception propagates normally so retries can still happen.
+- Concurrent calls with the same key (not just sequential retries) are also deduped — a per-key lock ensures only one caller actually executes the function; the rest wait and receive its result. Calls with different keys are unaffected and run in parallel.
+- A function that legitimately returns `None` is still deduped correctly — a stored `None` result is distinguished from "nothing cached yet."
 
 ## Storage backends
 

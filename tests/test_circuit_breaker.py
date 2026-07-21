@@ -1,4 +1,5 @@
 import asyncio
+import threading
 import time
 
 import pytest
@@ -167,6 +168,95 @@ def test_reset_forces_closed():
     assert breaker.state is CircuitState.OPEN
 
     breaker.reset()
+    assert breaker.state is CircuitState.CLOSED
+
+
+def test_half_open_allows_only_one_concurrent_trial_call():
+    # Regression test: half-open must let exactly one trial call through
+    # at a time. Without this, every caller queued up while the circuit
+    # was OPEN arrives the instant recovery_timeout elapses and all of
+    # them get let through simultaneously, hammering a dependency that
+    # has barely started recovering -- exactly what the circuit breaker
+    # exists to prevent.
+    breaker = CircuitBreaker(failure_threshold=1, recovery_timeout=0.05)
+
+    @circuit_breaker(breaker=breaker)
+    def flaky():
+        raise RuntimeError("boom")
+
+    with pytest.raises(RuntimeError):
+        flaky()
+    time.sleep(0.06)  # -> HALF_OPEN
+    assert breaker.state is CircuitState.HALF_OPEN
+
+    concurrent = {"current": 0, "max": 0}
+    lock = threading.Lock()
+
+    @circuit_breaker(breaker=breaker)
+    def slow_trial():
+        with lock:
+            concurrent["current"] += 1
+            concurrent["max"] = max(concurrent["max"], concurrent["current"])
+        time.sleep(0.05)
+        with lock:
+            concurrent["current"] -= 1
+        return "ok"
+
+    results = []
+
+    def worker():
+        try:
+            results.append(slow_trial())
+        except CircuitOpenError:
+            results.append("rejected")
+
+    threads = [threading.Thread(target=worker) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert concurrent["max"] == 1
+    assert results.count("ok") == 1
+    assert results.count("rejected") == 7
+    assert breaker.state is CircuitState.CLOSED  # the one trial succeeded
+
+
+def test_half_open_trial_slot_released_on_unexpected_exception():
+    # Regression test: an exception type outside expected_exception during
+    # a half-open trial must still release the trial slot. Otherwise the
+    # breaker gets permanently wedged rejecting every future call, since
+    # neither _on_success nor _on_failure runs for an unexpected exception
+    # type.
+    breaker = CircuitBreaker(
+        failure_threshold=1, recovery_timeout=0.05, expected_exception=ValueError
+    )
+
+    @circuit_breaker(breaker=breaker)
+    def raises_value_error():
+        raise ValueError("tracked")
+
+    with pytest.raises(ValueError):
+        raises_value_error()
+    time.sleep(0.06)
+    assert breaker.state is CircuitState.HALF_OPEN
+
+    @circuit_breaker(breaker=breaker)
+    def raises_type_error():
+        raise TypeError("not tracked by this breaker")
+
+    with pytest.raises(TypeError):
+        raises_type_error()
+
+    # Breaker must not be stuck: still half-open, and a subsequent trial
+    # must be allowed through rather than rejected.
+    assert breaker.state is CircuitState.HALF_OPEN
+
+    @circuit_breaker(breaker=breaker)
+    def succeeds():
+        return "ok"
+
+    assert succeeds() == "ok"
     assert breaker.state is CircuitState.CLOSED
 
 

@@ -38,7 +38,7 @@ __all__ = [
     "LoggingTracer",
 ]
 
-__version__ = "0.4.0"
+__version__ = "0.4.1"
 
 # RedisStore is intentionally NOT imported here: it lazily imports the
 # optional `redis` package inside RedisStore.__init__ so that `import latch`

@@ -71,6 +71,48 @@ def test_idempotent_decorator_works_with_redis_store():
     assert len(calls) == 1
 
 
+def test_idempotent_decorator_dedupes_none_returning_function_via_redis():
+    # Regression test (same class of bug as InMemoryStore): a None return
+    # value must still be cached and deduped, not treated as a cache miss
+    # forever. RedisStore.exists() uses Redis's native EXISTS, which is
+    # unaffected by what value is stored, but this exercises the full
+    # decorator + store integration end to end.
+    fake_client = fakeredis.FakeStrictRedis()
+    store = RedisStore(client=fake_client)
+    calls = []
+
+    @idempotent(store=store)
+    def delete_record(record_id):
+        calls.append(record_id)
+        return None
+
+    r1 = delete_record(record_id="R1", idempotency_key="k1")
+    r2 = delete_record(record_id="R1", idempotency_key="k1")
+
+    assert r1 is None
+    assert r2 is None
+    assert len(calls) == 1
+
+
+def test_idempotent_decorator_different_functions_sharing_redis_store_do_not_collide():
+    fake_client = fakeredis.FakeStrictRedis()
+    store = RedisStore(client=fake_client)
+
+    @idempotent(store=store)
+    def create_order(order_id):
+        return {"kind": "order", "order_id": order_id}
+
+    @idempotent(store=store)
+    def send_email(to):
+        return {"kind": "email", "to": to}
+
+    order_result = create_order(order_id="A1", idempotency_key="shared-key")
+    email_result = send_email(to="a@example.com", idempotency_key="shared-key")
+
+    assert order_result == {"kind": "order", "order_id": "A1"}
+    assert email_result == {"kind": "email", "to": "a@example.com"}
+
+
 def test_get_raises_clear_error_on_unexpected_client_response_type(redis_store, monkeypatch):
     # Simulates a client whose GET returns something other than
     # bytes/bytearray/str/None (e.g. a misconfigured response callback) --

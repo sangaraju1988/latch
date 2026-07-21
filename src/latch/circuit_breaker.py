@@ -74,6 +74,7 @@ class CircuitBreaker:
         self._state = CircuitState.CLOSED
         self._failure_count = 0
         self._opened_at: Optional[float] = None
+        self._half_open_trial_in_flight = False
         self._lock = threading.Lock()
 
     @property
@@ -98,14 +99,38 @@ class CircuitBreaker:
                 to_state=to_state.value,
             )
 
-    def _before_call(self) -> None:
+    def _before_call(self) -> bool:
+        """Returns True if this call acquired the (single) half-open trial
+        slot -- the caller must release it via `_on_success`/`_on_failure`
+        or, for an exception type outside `expected_exception`,
+        `_release_half_open_trial()` directly, so a bug in the wrapped
+        function can never wedge the breaker in a permanently-rejecting
+        state."""
         with self._lock:
             state = self._resolve_state()
             if state is CircuitState.OPEN:
                 remaining = self.recovery_timeout - (time.monotonic() - (self._opened_at or 0.0))
                 rejected = True
+                acquired_trial = False
+            elif state is CircuitState.HALF_OPEN:
+                if self._half_open_trial_in_flight:
+                    # Half-open allows exactly one trial call through at a
+                    # time -- without this, every caller queued up while
+                    # the circuit was open arrives the instant
+                    # recovery_timeout elapses and all of them get let
+                    # through simultaneously, hammering a dependency that
+                    # has barely started recovering (the exact thing this
+                    # primitive exists to prevent).
+                    remaining = 0.0
+                    rejected = True
+                    acquired_trial = False
+                else:
+                    self._half_open_trial_in_flight = True
+                    rejected = False
+                    acquired_trial = True
             else:
                 rejected = False
+                acquired_trial = False
         if rejected:
             if self.tracer is not None:
                 self.tracer.emit("circuit_breaker", "call_rejected")
@@ -113,6 +138,11 @@ class CircuitBreaker:
                 f"Circuit is open; rejecting call without executing it. "
                 f"Retry in ~{max(remaining, 0.0):.1f}s."
             )
+        return acquired_trial
+
+    def _release_half_open_trial(self) -> None:
+        with self._lock:
+            self._half_open_trial_in_flight = False
 
     def _on_success(self) -> None:
         with self._lock:
@@ -120,6 +150,7 @@ class CircuitBreaker:
             self._failure_count = 0
             self._state = CircuitState.CLOSED
             self._opened_at = None
+            self._half_open_trial_in_flight = False
         if self.tracer is not None:
             self.tracer.emit("circuit_breaker", "call_succeeded")
             if was_open:
@@ -132,6 +163,7 @@ class CircuitBreaker:
                 # Trial call failed: back to OPEN, restart recovery timer.
                 self._state = CircuitState.OPEN
                 self._opened_at = time.monotonic()
+                self._half_open_trial_in_flight = False
                 newly_opened = True
                 from_state = CircuitState.HALF_OPEN
             else:
@@ -152,24 +184,33 @@ class CircuitBreaker:
             self._state = CircuitState.CLOSED
             self._failure_count = 0
             self._opened_at = None
+            self._half_open_trial_in_flight = False
 
     def call(self, func: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
-        self._before_call()
+        acquired_trial = self._before_call()
         try:
             result = func(*args, **kwargs)
         except self.expected_exception as exc:
             self._on_failure(exc)
+            raise
+        except BaseException:
+            if acquired_trial:
+                self._release_half_open_trial()
             raise
         else:
             self._on_success()
             return result
 
     async def call_async(self, func: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
-        self._before_call()
+        acquired_trial = self._before_call()
         try:
             result = await func(*args, **kwargs)
         except self.expected_exception as exc:
             self._on_failure(exc)
+            raise
+        except BaseException:
+            if acquired_trial:
+                self._release_half_open_trial()
             raise
         else:
             self._on_success()
