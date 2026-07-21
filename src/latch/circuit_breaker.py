@@ -33,6 +33,7 @@ from enum import Enum
 from typing import Any, Callable, Optional, Type, TypeVar
 
 from latch.exceptions import CircuitOpenError
+from latch.tracing import Tracer
 
 F = TypeVar("F", bound=Callable[..., Any])
 
@@ -58,6 +59,7 @@ class CircuitBreaker:
         failure_threshold: int = 5,
         recovery_timeout: float = 30.0,
         expected_exception: Type[BaseException] = Exception,
+        tracer: Optional[Tracer] = None,
     ) -> None:
         if failure_threshold < 1:
             raise ValueError("failure_threshold must be >= 1")
@@ -67,6 +69,7 @@ class CircuitBreaker:
         self.failure_threshold = failure_threshold
         self.recovery_timeout = recovery_timeout
         self.expected_exception = expected_exception
+        self.tracer = tracer
 
         self._state = CircuitState.CLOSED
         self._failure_count = 0
@@ -83,36 +86,65 @@ class CircuitBreaker:
         if self._state is CircuitState.OPEN and self._opened_at is not None:
             if time.monotonic() - self._opened_at >= self.recovery_timeout:
                 self._state = CircuitState.HALF_OPEN
+                self._emit_state_changed(CircuitState.OPEN, CircuitState.HALF_OPEN)
         return self._state
+
+    def _emit_state_changed(self, from_state: CircuitState, to_state: CircuitState) -> None:
+        if self.tracer is not None:
+            self.tracer.emit(
+                "circuit_breaker",
+                "state_changed",
+                from_state=from_state.value,
+                to_state=to_state.value,
+            )
 
     def _before_call(self) -> None:
         with self._lock:
             state = self._resolve_state()
             if state is CircuitState.OPEN:
                 remaining = self.recovery_timeout - (time.monotonic() - (self._opened_at or 0.0))
-                raise CircuitOpenError(
-                    f"Circuit is open; rejecting call without executing it. "
-                    f"Retry in ~{max(remaining, 0.0):.1f}s."
-                )
+                rejected = True
+            else:
+                rejected = False
+        if rejected:
+            if self.tracer is not None:
+                self.tracer.emit("circuit_breaker", "call_rejected")
+            raise CircuitOpenError(
+                f"Circuit is open; rejecting call without executing it. "
+                f"Retry in ~{max(remaining, 0.0):.1f}s."
+            )
 
     def _on_success(self) -> None:
         with self._lock:
+            was_open = self._state is not CircuitState.CLOSED
             self._failure_count = 0
             self._state = CircuitState.CLOSED
             self._opened_at = None
+        if self.tracer is not None:
+            self.tracer.emit("circuit_breaker", "call_succeeded")
+            if was_open:
+                self._emit_state_changed(CircuitState.HALF_OPEN, CircuitState.CLOSED)
 
-    def _on_failure(self) -> None:
+    def _on_failure(self, exc: BaseException) -> None:
         with self._lock:
             state = self._resolve_state()
             if state is CircuitState.HALF_OPEN:
                 # Trial call failed: back to OPEN, restart recovery timer.
                 self._state = CircuitState.OPEN
                 self._opened_at = time.monotonic()
-                return
-            self._failure_count += 1
-            if self._failure_count >= self.failure_threshold:
-                self._state = CircuitState.OPEN
-                self._opened_at = time.monotonic()
+                newly_opened = True
+                from_state = CircuitState.HALF_OPEN
+            else:
+                self._failure_count += 1
+                newly_opened = self._failure_count >= self.failure_threshold
+                from_state = CircuitState.CLOSED
+                if newly_opened:
+                    self._state = CircuitState.OPEN
+                    self._opened_at = time.monotonic()
+        if self.tracer is not None:
+            self.tracer.emit("circuit_breaker", "call_failed", exception=repr(exc))
+            if newly_opened:
+                self._emit_state_changed(from_state, CircuitState.OPEN)
 
     def reset(self) -> None:
         """Force the circuit back to CLOSED. Primarily useful for tests."""
@@ -125,8 +157,8 @@ class CircuitBreaker:
         self._before_call()
         try:
             result = func(*args, **kwargs)
-        except self.expected_exception:
-            self._on_failure()
+        except self.expected_exception as exc:
+            self._on_failure(exc)
             raise
         else:
             self._on_success()
@@ -136,8 +168,8 @@ class CircuitBreaker:
         self._before_call()
         try:
             result = await func(*args, **kwargs)
-        except self.expected_exception:
-            self._on_failure()
+        except self.expected_exception as exc:
+            self._on_failure(exc)
             raise
         else:
             self._on_success()
@@ -150,17 +182,26 @@ def circuit_breaker(
     failure_threshold: int = 5,
     recovery_timeout: float = 30.0,
     expected_exception: Type[BaseException] = Exception,
+    tracer: Optional[Tracer] = None,
 ) -> Callable[[F], F]:
     """Decorator form of `CircuitBreaker`.
 
     Either pass a pre-built `breaker` (to share state across functions or
     to inspect/reset it from calling code), or let one be created from
-    `failure_threshold` / `recovery_timeout` / `expected_exception`.
+    `failure_threshold` / `recovery_timeout` / `expected_exception` /
+    `tracer`. As with those other construction args, `tracer` is only
+    used when building a *new* breaker -- if you pass a pre-built
+    `breaker`, set its tracer when you construct it.
+
+    `tracer` emits `state_changed(from_state, to_state)`,
+    `call_rejected`, `call_succeeded`, and `call_failed(exception)`
+    events (see `latch.tracing`).
     """
     active_breaker = breaker if breaker is not None else CircuitBreaker(
         failure_threshold=failure_threshold,
         recovery_timeout=recovery_timeout,
         expected_exception=expected_exception,
+        tracer=tracer,
     )
 
     def decorator(func: F) -> F:

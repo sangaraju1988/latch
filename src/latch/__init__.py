@@ -13,6 +13,7 @@ from latch.saga import Saga, SagaStep
 from latch.stores.base import IdempotencyStore
 from latch.stores.memory import InMemoryStore
 from latch.timeout import with_timeout
+from latch.tracing import LoggingTracer, TraceEvent, Tracer
 
 __all__ = [
     "idempotent",
@@ -32,9 +33,12 @@ __all__ = [
     "Saga",
     "SagaStep",
     "SagaExecutionError",
+    "Tracer",
+    "TraceEvent",
+    "LoggingTracer",
 ]
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 
 # RedisStore is intentionally NOT imported here: it lazily imports the
 # optional `redis` package inside RedisStore.__init__ so that `import latch`

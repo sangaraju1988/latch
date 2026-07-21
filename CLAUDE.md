@@ -4,7 +4,7 @@ This file is the persistent context for Claude Code working in this repo. Read i
 
 ## Mission
 
-`latch` is a small Python library (zero required dependencies in the core) that makes LLM agent tool calls safe to retry and hard to run away with. When an agent's tool call times out or errors, the agent doesn't know whether the underlying action actually completed — retrying blindly can double-charge a card, send a duplicate email, or create a duplicate order. Beyond that, an autonomous agent loop can also hammer an already-failing dependency, block indefinitely on a hung call, blow through a cost budget, or fail partway through a multi-step operation and leave real side effects with nothing to undo them. `latch` addresses all five with independent, composable primitives: `@idempotent` (dedupe retries), `@circuit_breaker` (fail fast against a known-down dependency), `@with_timeout` (bound call duration), `@budget_guardrail` (cap call count/cost per window), and `Saga` (compensate a multi-step sequence when a later step fails). `latch.adapters` layers framework-specific glue (OpenAI tool calling, LangChain) on top without making those SDKs hard dependencies of the core.
+`latch` is a small Python library (zero required dependencies in the core) that makes LLM agent tool calls safe to retry and hard to run away with. When an agent's tool call times out or errors, the agent doesn't know whether the underlying action actually completed — retrying blindly can double-charge a card, send a duplicate email, or create a duplicate order. Beyond that, an autonomous agent loop can also hammer an already-failing dependency, block indefinitely on a hung call, blow through a cost budget, or fail partway through a multi-step operation and leave real side effects with nothing to undo them. `latch` addresses all five with independent, composable primitives: `@idempotent` (dedupe retries), `@circuit_breaker` (fail fast against a known-down dependency), `@with_timeout` (bound call duration), `@budget_guardrail` (cap call count/cost per window), and `Saga` (compensate a multi-step sequence when a later step fails). `latch.adapters` layers framework-specific glue (OpenAI tool calling, LangChain) on top without making those SDKs hard dependencies of the core. `latch.tracing` gives every primitive above an optional, opt-in event stream (cache hits, circuit trips, timeouts, budget rejections, saga rollbacks) for observability, and `latch.chaos` is a companion testing utility that injects configurable failure/latency so the protection those primitives provide can actually be exercised and verified rather than assumed.
 
 ## Why this exists (prior art — be honest about it)
 
@@ -42,6 +42,16 @@ This looks like it contradicts the v0.2 packaging note above ("v0.3's adapters a
 
 ## Scope
 
+### v0.4 (shipped 2026-07-20 — observability + chaos testing)
+- `latch.tracing`: `TraceEvent` (frozen dataclass), `Tracer` (thread-safe pub/sub event bus), `LoggingTracer` (`Tracer` subclass that logs to `logging.getLogger("latch")` at INFO with zero extra wiring). `tracer: Optional[Tracer] = None` added to `idempotent()`, `circuit_breaker()`/`CircuitBreaker.__init__`, `with_timeout()`, `budget_guardrail()`/`BudgetGuardrail.__init__`, and `Saga.__init__` — opt-in, zero overhead when unused.
+- `latch.chaos`: `Chaos` class + `@chaos` decorator, injecting a configurable `failure_rate` and/or `latency_seconds`/`latency_jitter_seconds` into sync or async functions, with a seedable RNG (`seed=`) for reproducible runs. Ships as real, tested library code, not a doc-only snippet.
+- `benchmarks/chaos_benchmark.py` (not part of the installed package, like `examples/`) — runs an identical seeded-chaos agent retry loop against a naive vs. a `latch`-protected (`@with_timeout` outer, `@idempotent` inner) simulated payment call, and prints/writes a comparison table (orders attempted/succeeded/failed, real charges issued, orders double-charged, idempotency cache hits).
+- `examples/naive_agent_example.py` / `examples/resilient_agent_example.py` — a runnable before/after pair. Naive has zero latch imports and reproduces the double-charge bug live and deterministically (slow call exceeds a hand-rolled client timeout, agent retries, abandoned background thread still charges the card). Resilient protects the identical scenario with all five primitives plus a shared `LoggingTracer`, including a two-step `Saga` (charge card, then reserve hotel) with compensation.
+- 39 new tests (13 `test_tracing.py`, 14 `test_tracing_integration.py`, 12 `test_chaos.py`) on top of the 72 from v0.1–v0.3. 111 total.
+- `ruff` clean, `mypy --strict src/latch` clean, package builds and installs cleanly. `mypy --strict` was also run against `benchmarks/` and `examples/` as source alongside `src/latch` (not as an installed-package import, since neither directory ships a `py.typed` marker or is part of the wheel) — clean, aside from pre-existing `[type-arg]`/`[call-arg]` noise already present in every other `examples/*.py` file from earlier releases (mypy can't see that `@idempotent` adds an `idempotency_key` kwarg to the wrapped function's visible signature; not a regression, not addressed here — see Definition of done below).
+
+See `CHANGELOG.md` for full detail.
+
 ### v0.3 (shipped 2026-07-20 — saga/compensation + framework adapters)
 - `Saga` / `SagaStep` (`latch.saga`) — ordered multi-step execution with automatic reverse-order compensation on failure; sync (`run()`) and async (`run_async()`, mixed sync/async steps) support; imperative (`add_step`) and decorator (`@saga.step`) registration
 - `SagaExecutionError` — carries `step_name`, `original_exception` (also set as `__cause__`), `compensated_steps`, `compensation_errors` (compensation failures are collected, never swallowed, and don't stop the rest of rollback from being attempted)
@@ -74,27 +84,33 @@ See `CHANGELOG.md` for full detail.
 - Tests for sync, async, cache-hit, cache-miss, missing-key error, and TTL expiry
 - One usage example for a plain function and one for an OpenAI-style tool call
 
-### Explicit non-goals for v0.3 (do not build yet)
+### Explicit non-goals for v0.4 (do not build yet)
+- Exporting trace events to a specific observability backend (OpenTelemetry, Datadog, Prometheus, etc.) — `Tracer`/`LoggingTracer` are the generic hook; write your own subscriber to forward events to whatever backend you use, rather than `latch` taking a dependency on one
+- A general-purpose fuzzing/property-based-testing framework — `latch.chaos` injects exactly two failure shapes (probability of raising, added latency) on purpose; see the module docstring in `latch/chaos.py`
+- Distributed/multi-process `CircuitBreaker` or `BudgetGuardrail` state — still unchanged from the README's Production Considerations; only idempotency has a distributed backend (`RedisStore`)
+- A docs site, public launch materials, or the companion paper — that's v1.0, gated behind v0.4 being tagged and published the same way v0.4 was gated behind v0.3
+
+### Explicit non-goals for v0.3 (met — kept for history)
 - A standalone `latch-langchain` / `latch-openai` adapter package with hard SDK dependencies (see "Packaging decision (v0.3 adapters)" above) — deferred until an adapter genuinely needs one
 - Adapters for other frameworks (CrewAI, AutoGen, Semantic Kernel, etc.) — add only on real demand, not speculatively
 - Parallel/fan-out saga steps, nested sagas, or saga persistence/replay across process restarts — v0.3's `Saga` is in-process and sequential only; that covers the common case and keeps the abstraction small
-- Distributed tracing/observability (still v0.4)
-- Chaos-injection benchmark harness, example agents (still v0.4)
+- Distributed tracing/observability (v0.4 — done)
+- Chaos-injection benchmark harness, example agents (v0.4 — done)
 
 ### Explicit non-goals for v0.2 (met — kept for history)
 - Saga/compensation (v0.3 — done)
 - Framework adapters beyond a documented example (v0.3 — done, see reconciliation in "Packaging decision (v0.3 adapters)")
-- Distributed tracing/observability (v0.4)
+- Distributed tracing/observability (v0.4 — done)
 - Combining the four v0.2 primitives into a single "one decorator to rule them all" convenience wrapper — keep them independently composable (see `examples/resilient_tool_example.py` for the recommended stacking pattern) rather than adding a fifth abstraction on top
 
-Resist scope creep. v0.4 (chaos-injection benchmark harness, example agents, tracing hooks) starts only after v0.3 is tagged and published, same discipline that gated v0.3 behind v0.2 and v0.2 behind v0.1.
+Resist scope creep. v1.0 (docs site, public launch, paper submitted to arXiv) starts only after v0.4 is tagged and published, same discipline that gated v0.4 behind v0.3, v0.3 behind v0.2, and v0.2 behind v0.1.
 
 ## Roadmap (from the 90-day plan)
 
 - [x] v0.1 — Idempotency core + in-memory store + tests + docs
 - [x] v0.2 — Circuit breaker, timeout/cancellation, budget guardrails, Redis store
 - [x] v0.3 — Saga/compensation pattern, real OpenAI + LangChain adapter modules
-- [ ] v0.4 — Chaos-injection benchmark harness, example agents (before/after), tracing hooks
+- [x] v0.4 — Tracing/observability hooks, chaos-injection testing utility + benchmark harness, before/after example agents
 - [ ] v1.0 — Docs site, public launch, paper submitted to arXiv
 
 Update the checkboxes above as phases land.
@@ -133,6 +149,8 @@ Key behaviors:
 - v0.2 primitives (`circuit_breaker`, `with_timeout`, `budget_guardrail`) each follow the same shape as `idempotent`: a decorator factory that optionally accepts a pre-built, shareable stateful object (`CircuitBreaker`, `BudgetGuardrail`) so callers can share state across multiple decorated functions, or let the decorator build a private one. Keep new *single-call* primitives consistent with this shape rather than inventing a new configuration style per module.
 - `Saga` (v0.3) intentionally does NOT follow the decorator-factory shape — it orchestrates a *sequence* of calls, not one call, so it's a builder object (`add_step`/`step` to register, `run`/`run_async` to execute) instead. Don't force multi-step orchestration into the single-call decorator shape; don't force single-call primitives into the builder shape either. Pick the shape that matches what's being protected.
 - Adapter modules (`latch.adapters.*`) never import their target framework's SDK at module scope — they operate on duck-typed shapes (a callable, an object with the attributes the SDK's real objects have) so `import latch` and `import latch.adapters.<x>` both stay dependency-free. This is a harder constraint than `RedisStore`'s lazy-import-in-`__init__` pattern (adapters don't even need a lazy import, since they never construct an SDK object themselves) — keep it that way rather than reaching for `TYPE_CHECKING`-gated real imports the first time it'd be convenient.
+- `tracer: Optional[Tracer] = None` (v0.4) follows the same "optional, shareable, stateful object" shape already established for `breaker=`/`guardrail=`/`store=` — every primitive accepts it, defaults to `None`, and does nothing (`if self.tracer is not None: ...`) when not given, so tracing is free when unused and one `Tracer`/`LoggingTracer` instance can be shared across every primitive protecting a given dependency. Emit events with enough metadata to reconstruct what happened (`repr(exc)` for exceptions, not just an event name) but never let a subscriber's exception propagate out of `emit()` — that's the one deliberate, documented exception to the "never swallow errors" non-negotiable below, scoped narrowly to `Tracer.emit`'s subscriber-callback loop and nowhere else. When a primitive needs to emit from inside a lock (`CircuitBreaker`, `BudgetGuardrail`), compute what to emit while holding the lock but call `tracer.emit()` after releasing it, so an arbitrary subscriber callback never runs inside the primitive's critical section.
+- `latch.chaos` is a testing utility, not a protection primitive — don't give it a `tracer=` parameter or otherwise fold it into the five-primitives-plus-adapters architecture above; it deliberately sits to the side, the way a test double would.
 
 ## Conventions
 
@@ -169,14 +187,24 @@ Key behaviors:
 5. `examples/saga_example.py` (success + rollback walkthrough), `examples/openai_adapter_example.py`, `examples/langchain_adapter_example.py` (builds and invokes a real `StructuredTool`) all run standalone and were actually executed, not just written.
 6. `CHANGELOG.md` documents the release.
 
-## Immediate next tasks (v0.4 — work through in order)
+## Definition of done for v0.4 (met)
 
-v0.3 is code-complete, tested, and documented as of 2026-07-20. Companion article (`latch-article.docx`) was caught up through v0.3 on 2026-07-20 — no longer outstanding. Before starting v0.4:
+1. `pytest` passes with all v0.1–v0.3 tests plus new coverage for `latch.tracing` (subscribe/unsubscribe/emit, subscriber-exception isolation, `LoggingTracer` default and custom-logger behavior, metadata roundtrip across every primitive's event shape), the tracing integration into all five primitives (every documented event actually gets emitted at the right point — including circuit-breaker half-open recovery and a full saga failure-and-compensation event-sequence assertion), and `latch.chaos` (failure-rate boundaries including 0.0/1.0, seeded determinism, latency injection sync + async, custom exception types, shared injector across functions, construction-time validation). 111 tests total.
+2. `mypy --strict src/latch` clean (same pinned-mypy caveat as v0.2/v0.3). Also verified clean against `benchmarks/` and `examples/` when checked as source alongside `src/latch` in one invocation; pre-existing `[type-arg]`/`[call-arg]` findings in `examples/*.py` when checked standalone against the *installed* package are unrelated to this release (no `py.typed` marker ships yet — a pre-existing gap, not new) and out of scope for v0.4.
+3. README documents `latch.tracing` (Observability section) and `latch.chaos` (Chaos testing section) with copy-pasteable examples; Production Considerations' "no built-in observability" bullet corrected to reflect what shipped; roadmap checklist updated.
+4. Package builds and installs cleanly; `import latch` requires no optional dependencies; `tracer=` defaults to `None` on every primitive so existing callers are unaffected.
+5. `benchmarks/chaos_benchmark.py`, `examples/naive_agent_example.py`, and `examples/resilient_agent_example.py` all run standalone and were actually executed (not just written) — the benchmark was run at two different seeds to confirm the naive-vs-protected gap isn't a seed-specific fluke.
+6. `CHANGELOG.md` documents the release.
 
-1. Push to `main` and confirm CI is green on the actual GitHub Actions matrix (3.9–3.12). Done once already: the first push (commit `ab101bf`) failed on Python 3.9 only — `mypy --strict` caught a real pre-existing bug in `RedisStore.get()` that static local checks (`vermin`, `mypy --python-version 3.9` run by hand) had missed, because the failure came from mypy/redis-py stub *version resolution* differing per interpreter, not from source-level 3.9 incompatibility. Fixed in commit `9639748`. Confirms the CI-gate discipline in this file is load-bearing, not a formality — push the fix and re-check the matrix before tagging.
-2. Tag `v0.3.0` and push the tag.
-3. Publish `0.3.0` to PyPI (manual step — do not automate credentials). Verify with a fresh-venv install of the published (not locally-built) artifact.
-4. Only then start v0.4 (chaos-injection benchmark harness, example agents, tracing hooks) — do not start v0.4 work before v0.3 is tagged and published.
+## Immediate next tasks (v1.0 — work through in order)
+
+v0.4 is code-complete, tested, and documented as of 2026-07-20 (111 tests passing, `mypy --strict src/latch` clean, `ruff` clean). Before starting v1.0:
+
+1. Push to `main` and confirm CI is green on the actual GitHub Actions matrix (3.9–3.12) — not a formality; this exact gate caught a real pre-existing bug before v0.3 shipped (see `CHANGELOG.md` `[0.3.0]` Fixed section), so don't skip re-checking it here even though local checks were clean this time too.
+2. Tag `v0.4.0` and push the tag.
+3. Publish `0.4.0` to PyPI (manual step — do not automate credentials). Verify with a fresh-venv install of the published (not locally-built) artifact, the same way `0.3.0` was verified.
+4. Update `latch-article.docx` to cover v0.4 (tracing, chaos testing, the benchmark harness's naive-vs-protected numbers are good candidate evaluation data for the companion paper discussed for after v1.0).
+5. Only then start v1.0 (docs site, public launch, paper submitted to arXiv) — do not start v1.0 work before v0.4 is tagged and published, same discipline that has gated every phase so far.
 
 ## Non-negotiables
 

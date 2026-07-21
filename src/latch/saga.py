@@ -43,6 +43,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, List, Optional, Tuple
 
 from latch.exceptions import SagaExecutionError
+from latch.tracing import Tracer
 
 
 @dataclass
@@ -72,10 +73,17 @@ class Saga:
     again on the same instance (e.g. to retry the whole saga from the top
     after fixing the underlying issue) -- each call is an independent
     execution.
+
+    `tracer`, if given (see `latch.tracing`), emits `step_started(step)`,
+    `step_succeeded(step)`, `step_failed(step, exception)`,
+    `compensation_started(step)`, `compensation_succeeded(step)`,
+    `compensation_failed(step, exception)`, `saga_succeeded`, and
+    `saga_failed` events for every `run()`/`run_async()` call.
     """
 
-    def __init__(self, name: str = "saga") -> None:
+    def __init__(self, name: str = "saga", *, tracer: Optional[Tracer] = None) -> None:
         self.name = name
+        self.tracer = tracer
         self._steps: List[SagaStep] = []
 
     def add_step(
@@ -138,10 +146,13 @@ class Saga:
         completed: List[_CompletedStep] = []
 
         for step in self._steps:
+            self._emit("step_started", step=step.name)
             try:
                 result = step.action()
             except Exception as exc:
+                self._emit("step_failed", step=step.name, exception=repr(exc))
                 compensated, errors = self._compensate_sync(completed)
+                self._emit("saga_failed", step=step.name)
                 raise SagaExecutionError(
                     f"Saga '{self.name}' failed at step '{step.name}': {exc}",
                     step_name=step.name,
@@ -149,9 +160,11 @@ class Saga:
                     compensated_steps=compensated,
                     compensation_errors=errors,
                 ) from exc
+            self._emit("step_succeeded", step=step.name)
             results.append(result)
             completed.append(_CompletedStep(step, result))
 
+        self._emit("saga_succeeded")
         return results
 
     async def run_async(self) -> List[Any]:
@@ -165,10 +178,13 @@ class Saga:
         completed: List[_CompletedStep] = []
 
         for step in self._steps:
+            self._emit("step_started", step=step.name)
             try:
                 result = await self._call_action(step.action)
             except Exception as exc:
+                self._emit("step_failed", step=step.name, exception=repr(exc))
                 compensated, errors = await self._compensate_async(completed)
+                self._emit("saga_failed", step=step.name)
                 raise SagaExecutionError(
                     f"Saga '{self.name}' failed at step '{step.name}': {exc}",
                     step_name=step.name,
@@ -176,9 +192,11 @@ class Saga:
                     compensated_steps=compensated,
                     compensation_errors=errors,
                 ) from exc
+            self._emit("step_succeeded", step=step.name)
             results.append(result)
             completed.append(_CompletedStep(step, result))
 
+        self._emit("saga_succeeded")
         return results
 
     def _reject_async_steps(self) -> None:
@@ -191,6 +209,10 @@ class Saga:
                     f"compensation; use `await saga.run_async()` instead of `saga.run()`."
                 )
 
+    def _emit(self, event: str, **metadata: Any) -> None:
+        if self.tracer is not None:
+            self.tracer.emit("saga", event, **metadata)
+
     def _compensate_sync(
         self, completed: List[_CompletedStep]
     ) -> Tuple[List[str], List[Tuple[str, BaseException]]]:
@@ -199,11 +221,14 @@ class Saga:
         for entry in reversed(completed):
             if entry.step.compensation is None:
                 continue
+            self._emit("compensation_started", step=entry.step.name)
             try:
                 entry.step.compensation(entry.result)
             except Exception as comp_exc:  # noqa: BLE001 -- deliberately broad, best-effort rollback
+                self._emit("compensation_failed", step=entry.step.name, exception=repr(comp_exc))
                 errors.append((entry.step.name, comp_exc))
             else:
+                self._emit("compensation_succeeded", step=entry.step.name)
                 compensated.append(entry.step.name)
         return compensated, errors
 
@@ -216,6 +241,7 @@ class Saga:
             compensation = entry.step.compensation
             if compensation is None:
                 continue
+            self._emit("compensation_started", step=entry.step.name)
             try:
                 if inspect.iscoroutinefunction(compensation):
                     await compensation(entry.result)
@@ -224,8 +250,10 @@ class Saga:
                     if inspect.isawaitable(maybe_awaitable):
                         await maybe_awaitable
             except Exception as comp_exc:  # noqa: BLE001 -- deliberately broad, best-effort rollback
+                self._emit("compensation_failed", step=entry.step.name, exception=repr(comp_exc))
                 errors.append((entry.step.name, comp_exc))
             else:
+                self._emit("compensation_succeeded", step=entry.step.name)
                 compensated.append(entry.step.name)
         return compensated, errors
 

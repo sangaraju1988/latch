@@ -24,6 +24,8 @@ An agent calls a tool. The call times out. The agent doesn't know if the underly
 
 Each works standalone. The four single-call primitives also stack on the same function — see [`examples/resilient_tool_example.py`](examples/resilient_tool_example.py).
 
+Two supporting utilities sit alongside the five primitives: `latch.tracing` gives you an optional event stream (cache hits, circuit trips, timeouts, budget rejections, saga rollbacks) across all of them, and `latch.chaos` injects configurable failures/latency so you can verify the protection actually works instead of trusting it never gets exercised. See [Observability](#observability-tracing) and [Chaos testing](#chaos-testing) below.
+
 ## Install
 
 ```bash
@@ -51,7 +53,7 @@ assert result == result_again
 
 Works the same way for `async def` tool functions.
 
-See [`examples/`](examples/) for a plain-function example, an OpenAI-tool-call-shaped example, a v0.2 example composing all four single-call primitives, a v0.3 saga example, and v0.3 OpenAI/LangChain adapter examples.
+See [`examples/`](examples/) for a plain-function example, an OpenAI-tool-call-shaped example, a v0.2 example composing all four single-call primitives, a v0.3 saga example, v0.3 OpenAI/LangChain adapter examples, and a v0.4 before/after pair ([`naive_agent_example.py`](examples/naive_agent_example.py) / [`resilient_agent_example.py`](examples/resilient_agent_example.py)) showing the exact double-charge bug `latch` prevents, live.
 
 ## Circuit breaker
 
@@ -169,6 +171,61 @@ tool = StructuredTool.from_function(
 
 See [`examples/openai_adapter_example.py`](examples/openai_adapter_example.py) and [`examples/langchain_adapter_example.py`](examples/langchain_adapter_example.py) for full, runnable versions (the LangChain example builds and invokes a real `StructuredTool` — no LLM or API key needed).
 
+## Observability (tracing)
+
+Every primitive above can emit a stream of `TraceEvent`s about the decisions it makes — a cache hit, a circuit tripping open, a call timing out, a budget rejection, a saga step being compensated — without wiring `latch` to any specific logging or metrics stack.
+
+```python
+from latch import LoggingTracer, idempotent, with_timeout
+
+tracer = LoggingTracer()  # logs to logging.getLogger("latch") at INFO
+
+@with_timeout(seconds=10, tracer=tracer)
+@idempotent(tracer=tracer)
+def charge_card(order_id: str, amount: float) -> dict:
+    ...
+```
+
+Or subscribe your own callback to a plain `Tracer` if you want metrics/a dashboard instead of log lines:
+
+```python
+from latch import Tracer
+
+tracer = Tracer()
+tracer.subscribe(lambda event: my_metrics.increment(f"{event.primitive}.{event.event}"))
+```
+
+`tracer=` is accepted by every primitive (`idempotent`, `circuit_breaker`/`CircuitBreaker`, `with_timeout`, `budget_guardrail`/`BudgetGuardrail`, `Saga`) and defaults to `None` — fully opt-in, zero overhead when unused. A subscriber that raises never breaks the call it's observing (the one deliberate exception to latch's "never swallow errors" rule elsewhere — see `latch/tracing.py`). See [`examples/resilient_agent_example.py`](examples/resilient_agent_example.py) for a `LoggingTracer` wired through all five primitives on one scenario.
+
+## Chaos testing
+
+`latch.chaos` injects a configurable probability of failure and/or added latency into any function, so you can verify your protection actually works instead of trusting it never gets exercised:
+
+```python
+from latch.chaos import chaos
+
+@chaos(failure_rate=0.2, latency_seconds=0.5, seed=1)  # seed -> reproducible
+def call_flaky_dependency():
+    ...
+```
+
+Stack it under whatever `latch` primitives you're testing to simulate a payment API that's down 20% of the time or a network call that occasionally takes half a second, then assert your circuit breaker trips, your timeout fires, or your idempotent retry doesn't double-charge. [`benchmarks/chaos_benchmark.py`](benchmarks/chaos_benchmark.py) uses it to run the same simulated agent loop, with and without `latch`'s protection, under identical injected latency:
+
+```
+$ python benchmarks/chaos_benchmark.py --seed 1 --operations 30
+
+metric                             naive   protected
+----------------------------------------------------
+orders attempted                      30          30
+orders reported successful            21          30
+orders reported failed                 9           0
+total real charges issued             65          30
+orders double-charged                 21           0
+idempotency cache hits               n/a          18
+```
+
+Same injected latency, same client-timeout-and-retry loop shape — the only difference between the two columns is whether `@with_timeout`/`@idempotent` are in the stack. `latch.chaos` is deliberately narrow (a probability of failure plus added latency, not a general-purpose fuzzer) — see the module docstring for why.
+
 ## How it works
 
 - `idempotency_key` is a required keyword argument — `latch` never guesses or auto-generates one. The caller (your agent framework or orchestration code) decides what constitutes "the same logical operation."
@@ -210,7 +267,7 @@ def send_email(to: str) -> dict:
 - **`Saga` has no persistence.** Compensation runs in-process, synchronously, as part of the same `run()`/`run_async()` call that failed. If the process crashes or is killed mid-saga, nothing resumes or compensates automatically — `Saga` protects against a step raising an exception, not against the process dying. If you need crash-durable, resumable multi-step workflows, look at a workflow engine (Temporal, AWS Step Functions) instead; `Saga` is for the common case where a step's own exception is the failure mode you're guarding against.
 - **`CircuitBreaker` and `BudgetGuardrail` state is per-process, in-memory.** Run several replicas of your service and each has its own circuit and budget — they don't coordinate unless you build a shared backend yourself. Only idempotency has a distributed option (`RedisStore`); the other three primitives don't ship one. If you're horizontally scaled and need a shared circuit/budget, you'll need to add that layer.
 - **Sync `@with_timeout` doesn't kill the underlying call.** Python has no safe way to forcibly cancel a running thread, so a "timed out" sync call may still be executing in the background after `LatchTimeoutError` is raised. Only retry/react to the timeout in ways that are safe even if the original call eventually completes (this is exactly the scenario `@idempotent` is for). `async def` functions don't have this problem — they're cancelled cooperatively via `asyncio.wait_for`.
-- **No built-in observability.** `@idempotent` has an `on_duplicate` callback; the other primitives don't yet have equivalent hooks for logging/metrics on state transitions (circuit open/close, budget rejection, saga compensation). Wire your own logging inside the functions you wrap, or around the `CircuitBreaker`/`BudgetGuardrail` instances directly, until tracing hooks land in v0.4.
+- **Tracing is an opt-in event stream, not a tracing-backend integration.** `tracer=` (see [Observability](#observability-tracing)) gives you `TraceEvent`s in-process; it does not export to OpenTelemetry, Datadog, or any other backend by itself — write a subscriber that forwards events to whatever you use, or use `LoggingTracer` and let your existing log pipeline pick it up.
 - **Compatibility is verified statically for 3.9–3.12** (via `mypy --strict --python-version 3.9` and minimum-version analysis), and by the full test suite on whichever interpreter CI actually runs — check the badge/workflow status for the version you care about rather than assuming.
 
 None of this means "don't use it" — it means use it for what it's scoped for: single-process agent tool-call reliability, not a distributed orchestration platform.
@@ -220,7 +277,7 @@ None of this means "don't use it" — it means use it for what it's scoped for: 
 - [x] **v0.1** — Idempotency core, in-memory store, sync + async support (shipped)
 - [x] **v0.2** — Circuit breaker, timeout/cancellation propagation, budget guardrails, Redis store (shipped)
 - [x] **v0.3** — Saga/compensation pattern, OpenAI + LangChain adapter modules (shipped)
-- [ ] **v0.4** — Chaos-injection benchmark harness, example agents, tracing hooks
+- [x] **v0.4** — Tracing/observability hooks, chaos-injection testing utility, chaos benchmark harness, before/after example agents (shipped)
 - [ ] **v1.0** — Docs site, public launch, companion paper
 
 Full design notes and phase-by-phase plan are in [`CLAUDE.md`](CLAUDE.md).

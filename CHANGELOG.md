@@ -3,6 +3,26 @@
 All notable changes to this project are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.4.0] — 2026-07-20
+
+### Added
+
+- `latch.tracing`: `TraceEvent` (frozen dataclass: `primitive`, `event`, `timestamp`, `metadata`), `Tracer` (thread-safe pub/sub event bus — `subscribe()`/`unsubscribe()`/`emit()`), and `LoggingTracer` (a `Tracer` subclass that logs every event to `logging.getLogger("latch")` at INFO with no extra wiring). `tracer=` is now an optional parameter on `idempotent()`, `circuit_breaker()`/`CircuitBreaker`, `with_timeout()`, `budget_guardrail()`/`BudgetGuardrail`, and `Saga` — defaults to `None` everywhere (fully opt-in, zero overhead when unused). Full event catalog documented in `latch/tracing.py`'s module docstring and the README's Observability section. A subscriber that raises is caught and discarded at the point of emission — the one deliberate, documented exception to latch's "never swallow errors" rule, since a broken logging callback must not be able to break the call it's merely observing.
+- `latch.chaos`: `Chaos` class and `@chaos` decorator inject a configurable probability of failure and/or added latency (with optional jitter) into any sync or async function, with a seedable RNG for reproducible runs. Ships as real, tested library code (not a doc snippet) so it's usable directly in your own tests, not just internally. Deliberately narrow by design — two failure shapes only (raise, or add latency) — see the module docstring for why it isn't a general-purpose fuzzer.
+- `benchmarks/chaos_benchmark.py` (not part of the installed package, like `examples/`): runs the identical simulated agent retry loop twice under the same seeded `latch.chaos` latency profile — once against a naive/unprotected tool function, once against the same function protected by `@with_timeout` (outer) wrapping `@idempotent` (inner). Prints a comparison table (orders attempted/succeeded/failed, total real charges issued, orders double-charged, idempotency cache hits) and can write the same data as JSON via `--json`. Demonstrates, with real latch code rather than a mocked scenario, why composition order matters: because `idempotent` sits inside `with_timeout`, the background thread `with_timeout` can't kill still finishes and caches its result, so the agent's retry becomes a cache hit instead of a second charge.
+- `examples/naive_agent_example.py` / `examples/resilient_agent_example.py`: a runnable before/after pair. The naive version has zero latch imports and reproduces the exact double-charge bug described in CLAUDE.md's Mission section, live and deterministically. The resilient version protects the same scenario with all five primitives (idempotency, circuit breaker, timeout, budget guardrail, saga) plus a shared `LoggingTracer`, including a two-step `Saga` (charge card, then reserve hotel) with compensation wired up.
+- 39 new tests: `test_tracing.py` (13 — subscribe/unsubscribe/emit, subscriber-exception isolation, `LoggingTracer` behavior, metadata roundtrip across all five primitive event shapes), `test_tracing_integration.py` (14 — every primitive's actual emitted event sequence, including a full saga failure-and-compensation lifecycle assertion and circuit-breaker half-open recovery), `test_chaos.py` (12 — failure-rate boundaries, seeded determinism, latency injection sync/async, custom exception types, shared injector, construction-time validation). Full suite: 111 tests (up from 72).
+
+### Changed
+
+- Package description updated to mention tracing and chaos testing alongside the existing five primitives.
+- README: new "Observability (tracing)" and "Chaos testing" sections; Production Considerations' "No built-in observability" bullet replaced with an accurate description of what `tracer=` does and doesn't do (in-process event stream, not a tracing-backend export); roadmap checklist updated to mark v0.4 shipped.
+- `CircuitBreaker._on_failure` signature changed from `_on_failure(self)` to `_on_failure(self, exc: BaseException)` so the `call_failed` trace event can include `repr(exc)` — internal only, not part of the public decorator API.
+
+### Fixed
+
+- Nothing — no regressions found. `pytest`, `mypy --strict src/latch`, and `ruff check`/`ruff format` were all clean on the first full run after this release's changes (unlike v0.3, where CI caught a real pre-existing bug).
+
 ## [0.3.0] — 2026-07-20
 
 ### Added

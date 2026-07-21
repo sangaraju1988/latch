@@ -5,6 +5,7 @@ from typing import Any, Callable, Dict, Optional, TypeVar
 from latch.exceptions import IdempotencyKeyMissingError
 from latch.stores.base import IdempotencyStore
 from latch.stores.memory import InMemoryStore
+from latch.tracing import Tracer
 
 F = TypeVar("F", bound=Callable[..., Any])
 
@@ -18,6 +19,7 @@ def idempotent(
     key_arg: str = "idempotency_key",
     ttl_seconds: int = _DEFAULT_TTL_SECONDS,
     on_duplicate: Optional[Callable[[str, Any], None]] = None,
+    tracer: Optional[Tracer] = None,
 ) -> Callable[[F], F]:
     """Make a tool function idempotent.
 
@@ -38,6 +40,8 @@ def idempotent(
         ttl_seconds: How long a cached result remains valid.
         on_duplicate: Optional callback invoked as `on_duplicate(key, cached_result)`
             when a duplicate call is detected. Useful for logging/metrics.
+        tracer: Optional `Tracer` (see `latch.tracing`). Emits
+            `cache_hit(key)`, `cache_miss(key)`, and `stored(key)` events.
 
     Raises:
         IdempotencyKeyMissingError: if the caller does not supply `key_arg`.
@@ -54,9 +58,15 @@ def idempotent(
                 if cached is not None:
                     if on_duplicate is not None:
                         on_duplicate(key, cached)
+                    if tracer is not None:
+                        tracer.emit("idempotent", "cache_hit", key=key)
                     return cached
+                if tracer is not None:
+                    tracer.emit("idempotent", "cache_miss", key=key)
                 result = await func(*args, **kwargs)
                 active_store.set(key, result, ttl_seconds)
+                if tracer is not None:
+                    tracer.emit("idempotent", "stored", key=key)
                 return result
 
             return async_wrapper  # type: ignore[return-value]
@@ -68,9 +78,15 @@ def idempotent(
             if cached is not None:
                 if on_duplicate is not None:
                     on_duplicate(key, cached)
+                if tracer is not None:
+                    tracer.emit("idempotent", "cache_hit", key=key)
                 return cached
+            if tracer is not None:
+                tracer.emit("idempotent", "cache_miss", key=key)
             result = func(*args, **kwargs)
             active_store.set(key, result, ttl_seconds)
+            if tracer is not None:
+                tracer.emit("idempotent", "stored", key=key)
             return result
 
         return sync_wrapper  # type: ignore[return-value]

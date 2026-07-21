@@ -21,6 +21,7 @@ import time
 from typing import Any, Callable, Optional, TypeVar
 
 from latch.exceptions import BudgetExceededError
+from latch.tracing import Tracer
 
 F = TypeVar("F", bound=Callable[..., Any])
 
@@ -45,6 +46,7 @@ class BudgetGuardrail:
         max_calls: Optional[int] = None,
         max_cost: Optional[float] = None,
         window_seconds: Optional[float] = None,
+        tracer: Optional[Tracer] = None,
     ) -> None:
         if max_calls is None and max_cost is None:
             raise ValueError("at least one of max_calls or max_cost must be set")
@@ -58,6 +60,7 @@ class BudgetGuardrail:
         self.max_calls = max_calls
         self.max_cost = max_cost
         self.window_seconds = window_seconds
+        self.tracer = tracer
 
         self._lock = threading.Lock()
         self._window_start = time.monotonic()
@@ -85,19 +88,33 @@ class BudgetGuardrail:
             self._maybe_roll_window()
 
             if self.max_calls is not None and self._call_count + 1 > self.max_calls:
-                raise BudgetExceededError(
-                    f"Call budget exceeded: {self._call_count}/{self.max_calls} calls "
-                    f"already used in this window."
+                reason = (
+                    f"call count {self._call_count}/{self.max_calls} already used "
+                    f"in this window"
                 )
+                if self.tracer is not None:
+                    self.tracer.emit("budget_guardrail", "budget_exceeded", reason=reason)
+                raise BudgetExceededError(f"Call budget exceeded: {reason}.")
             projected_cost = self._total_cost + cost
             if self.max_cost is not None and projected_cost > self.max_cost:
-                raise BudgetExceededError(
-                    f"Cost budget exceeded: {self._total_cost:.4f} + {cost:.4f} would "
-                    f"exceed max_cost={self.max_cost:.4f} in this window."
+                reason = (
+                    f"{self._total_cost:.4f} + {cost:.4f} would exceed "
+                    f"max_cost={self.max_cost:.4f} in this window"
                 )
+                if self.tracer is not None:
+                    self.tracer.emit("budget_guardrail", "budget_exceeded", reason=reason)
+                raise BudgetExceededError(f"Cost budget exceeded: {reason}.")
 
             self._call_count += 1
             self._total_cost = projected_cost
+            if self.tracer is not None:
+                self.tracer.emit(
+                    "budget_guardrail",
+                    "call_recorded",
+                    call_count=self._call_count,
+                    total_cost=self._total_cost,
+                    cost=cost,
+                )
 
     @property
     def call_count(self) -> int:
@@ -126,21 +143,28 @@ def budget_guardrail(
     max_cost: Optional[float] = None,
     window_seconds: Optional[float] = None,
     cost_fn: Optional[CostFn] = None,
+    tracer: Optional[Tracer] = None,
 ) -> Callable[[F], F]:
     """Decorator form of `BudgetGuardrail`.
 
     Either pass a pre-built `guardrail` (to share budget across functions
     or inspect/reset it from calling code), or let one be created from
-    `max_calls` / `max_cost` / `window_seconds`.
+    `max_calls` / `max_cost` / `window_seconds` / `tracer`. As with those
+    other construction args, `tracer` is only used when building a *new*
+    guardrail -- if you pass a pre-built `guardrail`, set its tracer when
+    you construct it.
 
     `cost_fn`, if provided, is called with the same arguments as the
     wrapped function and must return the cost (in whatever unit you're
     budgeting) of this specific call — useful when different calls to the
     same tool have different prices (e.g. cost scales with token count or
     payload size).
+
+    `tracer` emits `call_recorded(call_count, total_cost, cost)` and
+    `budget_exceeded(reason)` events (see `latch.tracing`).
     """
     active_guardrail = guardrail if guardrail is not None else BudgetGuardrail(
-        max_calls=max_calls, max_cost=max_cost, window_seconds=window_seconds
+        max_calls=max_calls, max_cost=max_cost, window_seconds=window_seconds, tracer=tracer
     )
 
     def decorator(func: F) -> F:
