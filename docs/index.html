@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>I built a small library so my LLM agent stops double-charging people</title>
+<meta name="description" content="latch: a small, zero-dependency Python library that makes LLM agent tool calls safe to retry.">
+<style>
+  :root {
+    --text: #1a1a1a;
+    --muted: #5c5c5c;
+    --bg: #fdfdfb;
+    --code-bg: #f4f4f2;
+    --border: #e3e2dd;
+    --link: #1958a8;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    line-height: 1.65;
+  }
+  main {
+    max-width: 680px;
+    margin: 0 auto;
+    padding: 3.5rem 1.25rem 5rem;
+  }
+  header.site {
+    max-width: 680px;
+    margin: 0 auto;
+    padding: 1.25rem 1.25rem 0;
+    font-size: 0.9rem;
+  }
+  header.site a {
+    color: var(--muted);
+    text-decoration: none;
+  }
+  header.site a:hover { text-decoration: underline; }
+  h1 {
+    font-size: 1.9rem;
+    line-height: 1.25;
+    margin: 0.5rem 0 0.4rem;
+  }
+  .subtitle {
+    color: var(--muted);
+    font-size: 1rem;
+    margin: 0 0 2.2rem;
+  }
+  h2 {
+    font-size: 1.25rem;
+    margin: 2.4rem 0 0.9rem;
+    border-top: 1px solid var(--border);
+    padding-top: 1.6rem;
+  }
+  p { margin: 0 0 1.1rem; }
+  ul, ol { margin: 0 0 1.1rem; padding-left: 1.3rem; }
+  li { margin-bottom: 0.5rem; }
+  a { color: var(--link); }
+  code {
+    background: var(--code-bg);
+    padding: 0.15em 0.35em;
+    border-radius: 3px;
+    font-size: 0.88em;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 1rem 1.1rem;
+    overflow-x: auto;
+    font-size: 0.85rem;
+    line-height: 1.5;
+  }
+  pre code { background: none; padding: 0; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 0 0 1.3rem;
+    font-size: 0.92rem;
+  }
+  th, td {
+    text-align: left;
+    padding: 0.5rem 0.7rem;
+    border-bottom: 1px solid var(--border);
+  }
+  th { color: var(--muted); font-weight: 600; }
+  blockquote {
+    margin: 0 0 1.1rem;
+    padding: 0.3rem 1rem;
+    border-left: 3px solid var(--border);
+    color: var(--muted);
+  }
+  footer {
+    max-width: 680px;
+    margin: 0 auto;
+    padding: 0 1.25rem 3rem;
+    color: var(--muted);
+    font-size: 0.85rem;
+    border-top: 1px solid var(--border);
+    padding-top: 1.5rem;
+  }
+  footer a { color: var(--muted); }
+</style>
+</head>
+<body>
+
+<header class="site">
+  <a href="https://github.com/sangaraju1988/latch">&larr; github.com/sangaraju1988/latch</a>
+</header>
+
+<main>
+  <h1>I built a small library so my LLM agent stops double-charging people</h1>
+  <p class="subtitle">A small reliability layer for LLM agent tool calls &mdash; not a new idea, just one nobody had shipped as a pip-installable package yet.</p>
+
+  <p>Short version: agents that call tools over a network eventually retry a call they shouldn't. If the tool isn't idempotent, that retry becomes a duplicate charge, a duplicate email, a duplicate order. This is a decades-old distributed-systems problem wearing a new agent costume, and there wasn't a small, pip-installable fix for the agent version of it. So I built one. It's called <code>latch</code>. It is not a novel idea, and I'd rather say that up front than have someone else point it out in the comments.</p>
+
+  <h2>The bug, live</h2>
+  <p>Here's the whole thing in one file, no library involved:</p>
+  <pre><code>def charge_card(order_id, amount):
+    time.sleep(0.4)  # the payment API is a little slow today
+    ledger[order_id] += 1
+    return {"order_id": order_id, "status": "charged"}
+
+def agent_charge_with_naive_retry(order_id, amount, max_retries=2):
+    for attempt in range(max_retries):
+        thread = threading.Thread(target=lambda: charge_card(order_id, amount))
+        thread.start()
+        thread.join(timeout=0.2)  # the agent's own client-side timeout
+        if thread.is_alive():
+            continue  # "no response, let's retry"
+        return  # got a response
+</code></pre>
+
+  <p>The payment call takes 0.4s. The agent gives up waiting after 0.2s and retries. The first attempt is still running in the background &mdash; it wasn't cancelled, it can't be safely cancelled, Python threads don't work that way. So it finishes on its own time and charges the card. Then the retry charges it again. The agent's own view of the world is "everything's fine, got a response eventually." The ledger says otherwise.</p>
+
+  <p>This is <a href="https://github.com/sangaraju1988/latch/blob/main/examples/naive_agent_example.py"><code>examples/naive_agent_example.py</code></a> in the repo, if you want to run it and watch it happen rather than take my word for it.</p>
+
+  <p>None of this is exotic. It's the same class of problem as "what happens when a payment gateway's webhook fires twice," which every backend engineer who's touched Stripe has dealt with. The fix has a name &mdash; idempotency keys &mdash; and it's been standard practice in backend systems for a couple of decades. It just hadn't shown up as an off-the-shelf thing you <code>pip install</code> for the agent-tool-calling version of the same problem. That's the gap.</p>
+
+  <h2>What latch actually is</h2>
+  <p>A small Python library, no required dependencies, that wraps a tool function so calling it twice with the same <code>idempotency_key</code> only executes it once:</p>
+  <pre><code>from latch import idempotent
+
+@idempotent()
+def create_order(order_id: str, amount: float) -> dict:
+    return payments_api.charge(order_id, amount)
+
+create_order(order_id="A1", amount=42.0, idempotency_key="run-7-step-3")
+create_order(order_id="A1", amount=42.0, idempotency_key="run-7-step-3")  # cache hit, no second charge
+</code></pre>
+
+  <p><code>idempotency_key</code> is required, not auto-generated from the arguments. I went back and forth on this &mdash; auto-hashing the args is tempting and would make the decorator feel more magical. I didn't do it, because whether two calls with slightly different arguments should count as "the same operation" is a judgment call only the caller has the context to make. Guessing wrong silently is worse than making the caller type one extra kwarg.</p>
+
+  <p>Idempotency turned out to be the smallest piece of a slightly bigger problem, so three more decorators and one small orchestration class rode along on the same package over the following weeks:</p>
+
+  <table>
+    <tr><th>what</th><th>decorator</th><th>stops</th></tr>
+    <tr><td>idempotency</td><td><code>@idempotent</code></td><td>duplicate side effects on retry</td></tr>
+    <tr><td>circuit breaker</td><td><code>@circuit_breaker</code></td><td>hammering a dependency that's already down</td></tr>
+    <tr><td>timeout</td><td><code>@with_timeout</code></td><td>a hung call blocking the whole agent loop</td></tr>
+    <tr><td>budget guardrail</td><td><code>@budget_guardrail</code></td><td>a runaway loop burning unbounded cost</td></tr>
+    <tr><td>saga</td><td><code>Saga</code></td><td>a multi-step plan (charge &rarr; book flight &rarr; book hotel) left half-done when step 3 fails</td></tr>
+  </table>
+
+  <p>They're independent &mdash; use one, use all five, doesn't matter &mdash; but they compose on the same function:</p>
+  <pre><code>@budget_guardrail(max_calls=100, window_seconds=3600)
+@circuit_breaker(failure_threshold=5, recovery_timeout=30.0)
+@with_timeout(seconds=10)
+@idempotent()
+def charge_card(order_id: str, amount: float) -> dict:
+    ...
+</code></pre>
+
+  <p>There's also an opt-in tracing hook (<code>tracer=</code>, subscribe to what each primitive is doing &mdash; cache hits, circuit trips, saga rollbacks) and a small chaos-injection module for testing your own retry logic against simulated failure/latency instead of hoping it works. Neither is load-bearing to the pitch, so I'll leave the details to the <a href="https://github.com/sangaraju1988/latch#readme">README</a>.</p>
+
+  <h2>Does it actually help, or is that just a nice story</h2>
+  <p>I didn't want to ship this on vibes, so there's a benchmark that runs the exact double-charge scenario above, twice, under identical injected latency &mdash; once with nothing, once with <code>@with_timeout</code> wrapping <code>@idempotent</code>:</p>
+  <pre><code>$ python benchmarks/chaos_benchmark.py --seed 1 --operations 30
+
+metric                             naive   protected
+----------------------------------------------------
+orders attempted                      30          30
+orders reported successful            21          30
+orders reported failed                 9           0
+total real charges issued             65          30
+orders double-charged                 21           0
+idempotency cache hits               n/a          18
+</code></pre>
+
+  <p>30 simulated orders, same seed, same latency curve on both sides. The naive column: 21 of 30 got double-charged, and the agent's own success/failure reporting was wrong for a third of the batch (9 reported as failed outright, despite the card sometimes still getting charged). The protected column: zero double charges, and the "failure" case just becomes a cache hit on the retry instead of a second execution. A second run at a different seed (seed 7, 20 orders) landed at 12 double-charged naive vs. 0 protected &mdash; same shape, not a cherry-picked seed.</p>
+
+  <h2>The part I actually want to talk about</h2>
+  <p>Before I wrote a "ready for public use" README section, I made myself run a real audit against my own already-published package &mdash; not just re-reading the code, but fresh-install smoke tests, every snippet in the docs executed for real, and &mdash; this is the part that mattered &mdash; actual multi-threaded and <code>asyncio.gather</code> concurrency tests. My existing 111 tests were all sequential: call, retry, assert. Nothing had ever hit the decorator with two threads at once.</p>
+
+  <p>Turns out that matters. I found four real, silent bugs in code that was already on PyPI:</p>
+  <ul>
+    <li><code>@idempotent</code> didn't dedupe functions that return <code>None</code> &mdash; <code>store.get() is not None</code> can't tell "nothing cached" from "cached <code>None</code>," so a fire-and-forget tool (a delete, a notification) never got deduped at all.</li>
+    <li>Two decorated functions sharing a store could collide on the same key and silently return each other's cached result.</li>
+    <li>Under real concurrency &mdash; not sequential retries, actual threads racing &mdash; the "check cache, then execute" sequence wasn't atomic. N threads calling the same key at the same instant could all see a cache miss and all execute.</li>
+    <li>The circuit breaker's half-open state let unlimited concurrent calls through as "trial" calls, when the whole point of half-open is exactly one trial call.</li>
+  </ul>
+
+  <p>Every one of these is the kind of bug that doesn't crash, doesn't throw, doesn't show up in a code review &mdash; it just quietly does less than it promises to. I'd rather find that myself before anyone else's production traffic does. Fixed all four, added 17 regression tests specifically targeting concurrency (not just logic), and wrote up exactly what was wrong in the changelog instead of quietly folding it into "misc fixes." If you're evaluating a library like this for anything real, "here's what I found wrong with my own code and how" is more useful to you than a changelog that only ever says "improvements."</p>
+
+  <h2>What it's not</h2>
+  <p>It's Alpha software and I'd rather undersell it than have you find the ceiling the hard way:</p>
+  <ul>
+    <li><code>Saga</code> has no persistence. Compensation runs in-process; if the process dies mid-saga, nothing resumes automatically. If you need crash-durable multi-step workflows, that's a job for Temporal or Step Functions, not this.</li>
+    <li>The circuit breaker and budget guardrail hold state per-process. Run five replicas of your service, you get five independent circuits that don't talk to each other, unless you build that coordination yourself.</li>
+    <li>A sync <code>@with_timeout</code> can't actually kill the underlying call &mdash; Python has no safe way to force-kill a thread. It unblocks the caller and raises, but the original call might still be running in the background. This is exactly the scenario <code>@idempotent</code> exists for, which is why they're meant to be stacked, not used as substitutes for each other.</li>
+  </ul>
+  <p>None of that is a secret dealbreaker &mdash; it's just the actual scope, written down instead of implied away.</p>
+
+  <h2>Prior art, one more time</h2>
+  <p>To be clear about credit: SagaLLM (arXiv 2503.11951) already applies the Saga pattern to multi-agent LLM planning, Robust Agent Compensation (ACM CAIS) covers agents learning to compensate for their own failures, and ReliabilityBench is a whole benchmark for exactly this space. Circuit breakers and timeouts are decades-old patterns with existing Python libraries (<code>pybreaker</code>, <code>tenacity</code>) that do them well in a general context. I'm not claiming to have invented any of this. What I think was actually missing was the boring part &mdash; a small, tested, zero-dependency, <code>pip install</code>-able version scoped specifically to the shape of an LLM tool call, that a working developer can drop into an agent loop this afternoon without reading a paper first. If that's wrong and something like this already exists and I missed it, I'd genuinely like to know &mdash; tell me in the comments.</p>
+
+  <h2>Try it</h2>
+  <pre><code>pip install latch-idempotent</code></pre>
+  <ul>
+    <li>Repo: <a href="https://github.com/sangaraju1988/latch">github.com/sangaraju1988/latch</a></li>
+    <li>PyPI: <a href="https://pypi.org/project/latch-idempotent/">pypi.org/project/latch-idempotent</a></li>
+    <li>The double-charge demo above: <a href="https://github.com/sangaraju1988/latch/blob/main/examples/naive_agent_example.py"><code>examples/naive_agent_example.py</code></a> / <a href="https://github.com/sangaraju1988/latch/blob/main/examples/resilient_agent_example.py"><code>examples/resilient_agent_example.py</code></a></li>
+  </ul>
+
+  <p>If you're building anything that calls a tool with a real side effect and retries on failure &mdash; which, if you're building agents, you already are, whether you've thought about it that way or not &mdash; I'd be curious whether this is useful to you, or where it falls over. Issues and PRs are welcome, and honestly the "where does this break" feedback is worth more to me right now than stars.</p>
+</main>
+
+<footer>
+  Venkata Sangaraju &middot; <a href="https://github.com/sangaraju1988/latch">latch on GitHub</a> &middot; <a href="https://pypi.org/project/latch-idempotent/">latch on PyPI</a>
+</footer>
+
+</body>
+</html>
