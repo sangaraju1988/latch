@@ -1,0 +1,22 @@
+{
+  "source": "diamonds (ggplot2, via pydataset)",
+  "path": "data/diamonds_raw.csv",
+  "row_count": 53940,
+  "columns": [
+    "row_id",
+    "carat",
+    "cut",
+    "color",
+    "clarity",
+    "depth",
+    "table_pct",
+    "price",
+    "x",
+    "y",
+    "z"
+  ],
+  "sha256": "2983d4d27b16f843fcb9b6358771e2746f4aa135ae219a97a77c41ca2afbee3d",
+  "price_min": 326.0,
+  "price_max": 18823.0,
+  "price_sum": 212135217.0
+}

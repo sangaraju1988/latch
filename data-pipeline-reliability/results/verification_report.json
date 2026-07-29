@@ -1,0 +1,374 @@
+{
+  "total_checks": 29,
+  "passed": 29,
+  "failed": 0,
+  "all_passed": true,
+  "checks": [
+    {
+      "name": "source_csv_diamonds_integrity",
+      "passed": true,
+      "error": "",
+      "details": {
+        "row_count": 53940,
+        "sha256": "2983d4d27b16f843fcb9b6358771e2746f4aa135ae219a97a77c41ca2afbee3d"
+      }
+    },
+    {
+      "name": "source_csv_housing_integrity",
+      "passed": true,
+      "error": "",
+      "details": {
+        "row_count": 546,
+        "sha256": "6f419791ee7b7f8f1b7c206f8956d6da4dc52f43ae937d071f6d6ee1f7d019f8"
+      }
+    },
+    {
+      "name": "benchmark_results:naive:warehouse_matches_report",
+      "passed": true,
+      "error": "",
+      "details": {
+        "db_path": "data/warehouse_naive_seed1.db",
+        "independently_computed": {
+          "total_rows": 129444,
+          "distinct_batches": 40,
+          "duplicated_batches": 32,
+          "duplicate_physical_inserts": 56
+        }
+      }
+    },
+    {
+      "name": "benchmark_results:naive:invariant",
+      "passed": true,
+      "error": "",
+      "details": {
+        "expected_rows": 53940,
+        "actual_total_rows": 129444,
+        "duplicated_batches": 32
+      }
+    },
+    {
+      "name": "benchmark_results:protected:warehouse_matches_report",
+      "passed": true,
+      "error": "",
+      "details": {
+        "db_path": "data/warehouse_protected_seed1.db",
+        "independently_computed": {
+          "total_rows": 53940,
+          "distinct_batches": 40,
+          "duplicated_batches": 0,
+          "duplicate_physical_inserts": 0
+        }
+      }
+    },
+    {
+      "name": "benchmark_results:protected:invariant",
+      "passed": true,
+      "error": "",
+      "details": {
+        "expected_rows": 53940,
+        "actual_total_rows": 53940,
+        "duplicated_batches": 0
+      }
+    },
+    {
+      "name": "benchmark_seed1:naive:warehouse_matches_report",
+      "passed": true,
+      "error": "",
+      "details": {
+        "db_path": "data/warehouse_naive_seed1.db",
+        "independently_computed": {
+          "total_rows": 129444,
+          "distinct_batches": 40,
+          "duplicated_batches": 32,
+          "duplicate_physical_inserts": 56
+        }
+      }
+    },
+    {
+      "name": "benchmark_seed1:naive:invariant",
+      "passed": true,
+      "error": "",
+      "details": {
+        "expected_rows": 53940,
+        "actual_total_rows": 129444,
+        "duplicated_batches": 32
+      }
+    },
+    {
+      "name": "benchmark_seed1:protected:warehouse_matches_report",
+      "passed": true,
+      "error": "",
+      "details": {
+        "db_path": "data/warehouse_protected_seed1.db",
+        "independently_computed": {
+          "total_rows": 53940,
+          "distinct_batches": 40,
+          "duplicated_batches": 0,
+          "duplicate_physical_inserts": 0
+        }
+      }
+    },
+    {
+      "name": "benchmark_seed1:protected:invariant",
+      "passed": true,
+      "error": "",
+      "details": {
+        "expected_rows": 53940,
+        "actual_total_rows": 53940,
+        "duplicated_batches": 0
+      }
+    },
+    {
+      "name": "benchmark_seed2:naive:warehouse_matches_report",
+      "passed": true,
+      "error": "",
+      "details": {
+        "db_path": "/sessions/sharp-loving-ramanujan/tmp/tmpo8zdnpoe.db",
+        "independently_computed": {
+          "total_rows": 128095,
+          "distinct_batches": 40,
+          "duplicated_batches": 31,
+          "duplicate_physical_inserts": 55
+        }
+      }
+    },
+    {
+      "name": "benchmark_seed2:naive:invariant",
+      "passed": true,
+      "error": "",
+      "details": {
+        "expected_rows": 53940,
+        "actual_total_rows": 128095,
+        "duplicated_batches": 31
+      }
+    },
+    {
+      "name": "benchmark_seed2:protected:warehouse_matches_report",
+      "passed": true,
+      "error": "",
+      "details": {
+        "db_path": "/sessions/sharp-loving-ramanujan/tmp/tmp_g32f3_7.db",
+        "independently_computed": {
+          "total_rows": 53940,
+          "distinct_batches": 40,
+          "duplicated_batches": 0,
+          "duplicate_physical_inserts": 0
+        }
+      }
+    },
+    {
+      "name": "benchmark_seed2:protected:invariant",
+      "passed": true,
+      "error": "",
+      "details": {
+        "expected_rows": 53940,
+        "actual_total_rows": 53940,
+        "duplicated_batches": 0
+      }
+    },
+    {
+      "name": "benchmark_seed3:naive:warehouse_matches_report",
+      "passed": true,
+      "error": "",
+      "details": {
+        "db_path": "/sessions/sharp-loving-ramanujan/tmp/tmp2m25nkti.db",
+        "independently_computed": {
+          "total_rows": 142934,
+          "distinct_batches": 40,
+          "duplicated_batches": 35,
+          "duplicate_physical_inserts": 66
+        }
+      }
+    },
+    {
+      "name": "benchmark_seed3:naive:invariant",
+      "passed": true,
+      "error": "",
+      "details": {
+        "expected_rows": 53940,
+        "actual_total_rows": 142934,
+        "duplicated_batches": 35
+      }
+    },
+    {
+      "name": "benchmark_seed3:protected:warehouse_matches_report",
+      "passed": true,
+      "error": "",
+      "details": {
+        "db_path": "/sessions/sharp-loving-ramanujan/tmp/tmpwlolg86v.db",
+        "independently_computed": {
+          "total_rows": 53940,
+          "distinct_batches": 40,
+          "duplicated_batches": 0,
+          "duplicate_physical_inserts": 0
+        }
+      }
+    },
+    {
+      "name": "benchmark_seed3:protected:invariant",
+      "passed": true,
+      "error": "",
+      "details": {
+        "expected_rows": 53940,
+        "actual_total_rows": 53940,
+        "duplicated_batches": 0
+      }
+    },
+    {
+      "name": "benchmark_seed4:naive:warehouse_matches_report",
+      "passed": true,
+      "error": "",
+      "details": {
+        "db_path": "/sessions/sharp-loving-ramanujan/tmp/tmpzqwfce5l.db",
+        "independently_computed": {
+          "total_rows": 138907,
+          "distinct_batches": 40,
+          "duplicated_batches": 35,
+          "duplicate_physical_inserts": 63
+        }
+      }
+    },
+    {
+      "name": "benchmark_seed4:naive:invariant",
+      "passed": true,
+      "error": "",
+      "details": {
+        "expected_rows": 53940,
+        "actual_total_rows": 138907,
+        "duplicated_batches": 35
+      }
+    },
+    {
+      "name": "benchmark_seed4:protected:warehouse_matches_report",
+      "passed": true,
+      "error": "",
+      "details": {
+        "db_path": "/sessions/sharp-loving-ramanujan/tmp/tmplciyy9fc.db",
+        "independently_computed": {
+          "total_rows": 53940,
+          "distinct_batches": 40,
+          "duplicated_batches": 0,
+          "duplicate_physical_inserts": 0
+        }
+      }
+    },
+    {
+      "name": "benchmark_seed4:protected:invariant",
+      "passed": true,
+      "error": "",
+      "details": {
+        "expected_rows": 53940,
+        "actual_total_rows": 53940,
+        "duplicated_batches": 0
+      }
+    },
+    {
+      "name": "benchmark_seed5:naive:warehouse_matches_report",
+      "passed": true,
+      "error": "",
+      "details": {
+        "db_path": "/sessions/sharp-loving-ramanujan/tmp/tmpa4sa9lby.db",
+        "independently_computed": {
+          "total_rows": 113256,
+          "distinct_batches": 40,
+          "duplicated_batches": 26,
+          "duplicate_physical_inserts": 44
+        }
+      }
+    },
+    {
+      "name": "benchmark_seed5:naive:invariant",
+      "passed": true,
+      "error": "",
+      "details": {
+        "expected_rows": 53940,
+        "actual_total_rows": 113256,
+        "duplicated_batches": 26
+      }
+    },
+    {
+      "name": "benchmark_seed5:protected:warehouse_matches_report",
+      "passed": true,
+      "error": "",
+      "details": {
+        "db_path": "/sessions/sharp-loving-ramanujan/tmp/tmpv9p46an9.db",
+        "independently_computed": {
+          "total_rows": 53940,
+          "distinct_batches": 40,
+          "duplicated_batches": 0,
+          "duplicate_physical_inserts": 0
+        }
+      }
+    },
+    {
+      "name": "benchmark_seed5:protected:invariant",
+      "passed": true,
+      "error": "",
+      "details": {
+        "expected_rows": 53940,
+        "actual_total_rows": 53940,
+        "duplicated_batches": 0
+      }
+    },
+    {
+      "name": "cross_engine_pandas_vs_spark_aggregates",
+      "passed": true,
+      "error": "",
+      "details": {
+        "csv_module_stats": {
+          "count": 53940,
+          "sum": 212135217.0,
+          "min": 326.0,
+          "max": 18823.0
+        },
+        "pandas_meta": {
+          "source": "diamonds (ggplot2, via pydataset)",
+          "path": "data/diamonds_raw.csv",
+          "row_count": 53940,
+          "columns": [
+            "row_id",
+            "carat",
+            "cut",
+            "color",
+            "clarity",
+            "depth",
+            "table_pct",
+            "price",
+            "x",
+            "y",
+            "z"
+          ],
+          "sha256": "2983d4d27b16f843fcb9b6358771e2746f4aa135ae219a97a77c41ca2afbee3d",
+          "price_min": 326.0,
+          "price_max": 18823.0,
+          "price_sum": 212135217.0
+        },
+        "spark": {
+          "total_rows": 53940,
+          "price_sum": 212135217.0,
+          "price_min": 326.0,
+          "price_max": 18823.0
+        }
+      }
+    },
+    {
+      "name": "saga_demo_rollback_verified_against_raw_db",
+      "passed": true,
+      "error": "",
+      "details": {
+        "poison_batch_id": "housing-2026-01-05",
+        "total_rows_independently_computed": 496
+      }
+    },
+    {
+      "name": "airflow_dag_run_warehouse_matches_log",
+      "passed": true,
+      "error": "",
+      "details": {
+        "total_rows": 53940,
+        "distinct_batches": 40,
+        "duplicated_batches": 0
+      }
+    }
+  ]
+}

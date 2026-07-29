@@ -1,0 +1,163 @@
+{
+  "source_dataset": "Housing (Windsor house sales, via pydataset)",
+  "db_path": "data/warehouse_housing_saga.db",
+  "poison_batch_id": "housing-2026-01-05",
+  "num_batches": 11,
+  "per_batch_saga_outcomes": [
+    {
+      "batch_id": "housing-2026-01-01",
+      "outcome": "success",
+      "expected_rows": 50
+    },
+    {
+      "batch_id": "housing-2026-01-02",
+      "outcome": "success",
+      "expected_rows": 50
+    },
+    {
+      "batch_id": "housing-2026-01-03",
+      "outcome": "success",
+      "expected_rows": 50
+    },
+    {
+      "batch_id": "housing-2026-01-04",
+      "outcome": "success",
+      "expected_rows": 50
+    },
+    {
+      "batch_id": "housing-2026-01-05",
+      "outcome": "rolled_back",
+      "failed_step": "trigger_refresh",
+      "compensated_steps": [
+        "mark_processed",
+        "load_fact_table"
+      ],
+      "compensation_errors": [],
+      "original_exception": "simulated downstream refresh outage for housing-2026-01-05",
+      "expected_rows": 50
+    },
+    {
+      "batch_id": "housing-2026-01-06",
+      "outcome": "success",
+      "expected_rows": 50
+    },
+    {
+      "batch_id": "housing-2026-01-07",
+      "outcome": "success",
+      "expected_rows": 50
+    },
+    {
+      "batch_id": "housing-2026-01-08",
+      "outcome": "success",
+      "expected_rows": 50
+    },
+    {
+      "batch_id": "housing-2026-01-09",
+      "outcome": "success",
+      "expected_rows": 50
+    },
+    {
+      "batch_id": "housing-2026-01-10",
+      "outcome": "success",
+      "expected_rows": 50
+    },
+    {
+      "batch_id": "housing-2026-01-11",
+      "outcome": "success",
+      "expected_rows": 46
+    }
+  ],
+  "post_run_db_checks": [
+    {
+      "batch_id": "housing-2026-01-01",
+      "is_poison_batch": false,
+      "outcome": "success",
+      "rows_in_fact_table": 50,
+      "marked_processed": true,
+      "check_passed": true
+    },
+    {
+      "batch_id": "housing-2026-01-02",
+      "is_poison_batch": false,
+      "outcome": "success",
+      "rows_in_fact_table": 50,
+      "marked_processed": true,
+      "check_passed": true
+    },
+    {
+      "batch_id": "housing-2026-01-03",
+      "is_poison_batch": false,
+      "outcome": "success",
+      "rows_in_fact_table": 50,
+      "marked_processed": true,
+      "check_passed": true
+    },
+    {
+      "batch_id": "housing-2026-01-04",
+      "is_poison_batch": false,
+      "outcome": "success",
+      "rows_in_fact_table": 50,
+      "marked_processed": true,
+      "check_passed": true
+    },
+    {
+      "batch_id": "housing-2026-01-05",
+      "is_poison_batch": true,
+      "outcome": "rolled_back",
+      "rows_in_fact_table": 0,
+      "marked_processed": false,
+      "check_passed": true
+    },
+    {
+      "batch_id": "housing-2026-01-06",
+      "is_poison_batch": false,
+      "outcome": "success",
+      "rows_in_fact_table": 50,
+      "marked_processed": true,
+      "check_passed": true
+    },
+    {
+      "batch_id": "housing-2026-01-07",
+      "is_poison_batch": false,
+      "outcome": "success",
+      "rows_in_fact_table": 50,
+      "marked_processed": true,
+      "check_passed": true
+    },
+    {
+      "batch_id": "housing-2026-01-08",
+      "is_poison_batch": false,
+      "outcome": "success",
+      "rows_in_fact_table": 50,
+      "marked_processed": true,
+      "check_passed": true
+    },
+    {
+      "batch_id": "housing-2026-01-09",
+      "is_poison_batch": false,
+      "outcome": "success",
+      "rows_in_fact_table": 50,
+      "marked_processed": true,
+      "check_passed": true
+    },
+    {
+      "batch_id": "housing-2026-01-10",
+      "is_poison_batch": false,
+      "outcome": "success",
+      "rows_in_fact_table": 50,
+      "marked_processed": true,
+      "check_passed": true
+    },
+    {
+      "batch_id": "housing-2026-01-11",
+      "is_poison_batch": false,
+      "outcome": "success",
+      "rows_in_fact_table": 46,
+      "marked_processed": true,
+      "check_passed": true
+    }
+  ],
+  "actual_total_rows_in_fact_table": 496,
+  "expected_total_rows_excluding_poison_batch": 496,
+  "all_checks_passed": true
+}

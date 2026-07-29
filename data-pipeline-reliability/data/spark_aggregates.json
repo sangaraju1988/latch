@@ -1,0 +1,73 @@
+{
+  "engine": "pyspark",
+  "spark_version": "3.5.3",
+  "source_csv": "data/diamonds_raw.csv",
+  "total_rows": 53940,
+  "price_sum": 212135217.0,
+  "price_min": 326.0,
+  "price_max": 18823.0,
+  "by_cut": [
+    {
+      "cut": "Fair",
+      "count": 1610,
+      "avg_price": 4358.757763975155
+    },
+    {
+      "cut": "Good",
+      "count": 4906,
+      "avg_price": 3928.864451691806
+    },
+    {
+      "cut": "Ideal",
+      "count": 21551,
+      "avg_price": 3457.541970210199
+    },
+    {
+      "cut": "Premium",
+      "count": 13791,
+      "avg_price": 4584.2577042999055
+    },
+    {
+      "cut": "Very Good",
+      "count": 12082,
+      "avg_price": 3981.7598907465654
+    }
+  ],
+  "by_color": [
+    {
+      "color": "D",
+      "count": 6775,
+      "avg_price": 3169.9540959409596
+    },
+    {
+      "color": "E",
+      "count": 9797,
+      "avg_price": 3076.7524752475247
+    },
+    {
+      "color": "F",
+      "count": 9542,
+      "avg_price": 3724.886396981765
+    },
+    {
+      "color": "G",
+      "count": 11292,
+      "avg_price": 3999.135671271697
+    },
+    {
+      "color": "H",
+      "count": 8304,
+      "avg_price": 4486.669195568401
+    },
+    {
+      "color": "I",
+      "count": 5422,
+      "avg_price": 5091.874953891553
+    },
+    {
+      "color": "J",
+      "count": 2808,
+      "avg_price": 5323.81801994302
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+# Core requirements to run extract/transform/benchmarks/saga demo/tests/checker.
+latch-idempotent>=0.4.1
+pandas>=2.0
+pydataset>=0.2.0
+pytest>=7.0
+
+# Optional -- only needed for spark/transform_spark.py (independent
+# cross-engine validation). Requires a JRE (Java 8, 11, or 17). Pin to
+# 3.5.x if your environment only has Java 11 -- pyspark 4.x requires Java 17.
+# pyspark==3.5.3
+
+# Optional -- only needed to actually run airflow_dags/diamond_sales_load_dag.py
+# with a real Airflow scheduler/CLI (`airflow dags test ...`). Heavy
+# dependency set; install in its own virtualenv.
+# apache-airflow-core==3.3.0

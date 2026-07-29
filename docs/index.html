@@ -115,7 +115,7 @@
   <h1>I built a small library so my LLM agent stops double-charging people</h1>
   <p class="subtitle">A small reliability layer for LLM agent tool calls &mdash; not a new idea, just one nobody had shipped as a pip-installable package yet.</p>
 
-  <p>Short version: agents that call tools over a network eventually retry a call they shouldn't. If the tool isn't idempotent, that retry becomes a duplicate charge, a duplicate email, a duplicate order. This is a decades-old distributed-systems problem wearing a new agent costume, and there wasn't a small, pip-installable fix for the agent version of it. So I built one. It's called <code>latch</code>. It is not a novel idea, and I'd rather say that up front than have someone else point it out in the comments.</p>
+  <p>Agents that call tools over a network eventually retry a call they shouldn't have. If the tool isn't idempotent, that retry becomes a duplicate charge, a duplicate email, a duplicate order &mdash; quietly, with nothing in the logs to flag it. It's a decades-old distributed-systems problem wearing a new agent costume, and as far as I could tell, nobody had shipped a small, pip-installable fix for the agent-shaped version of it. So I built one. It's called <code>latch</code>. Worth saying up front: this is not a novel idea, and I'd rather say so myself than have someone point it out in the comments.</p>
 
   <h2>The bug, live</h2>
   <p>Here's the whole thing in one file, no library involved:</p>
