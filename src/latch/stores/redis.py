@@ -18,8 +18,10 @@ in-process. Only unpickle data from a Redis instance you trust — this
 follows the same caveat as Python's `pickle` module generally.
 """
 
+from __future__ import annotations
+
 import pickle
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 from latch.stores.base import IdempotencyStore
 
@@ -38,8 +40,8 @@ class RedisStore(IdempotencyStore):
     def __init__(
         self,
         *,
-        client: Optional["redis_module.Redis"] = None,
-        url: Optional[str] = None,
+        client: redis_module.Redis | None = None,
+        url: str | None = None,
         key_prefix: str = "latch:idempotency:",
         **redis_kwargs: Any,
     ) -> None:
@@ -76,7 +78,7 @@ class RedisStore(IdempotencyStore):
     def _full_key(self, key: str) -> str:
         return f"{self._key_prefix}{key}"
 
-    def get(self, key: str) -> Optional[Any]:
+    def get(self, key: str) -> Any | None:
         raw = self._client.get(self._full_key(key))
         if raw is None:
             return None

@@ -1,9 +1,11 @@
+from __future__ import annotations
+
 import asyncio
 import functools
 import inspect
 import threading
 import weakref
-from typing import Any, Callable, Dict, Optional, Tuple, TypeVar
+from typing import Any, Callable, TypeVar
 
 from latch.exceptions import IdempotencyKeyMissingError
 from latch.stores.base import IdempotencyStore
@@ -21,10 +23,10 @@ _DEFAULT_TTL_SECONDS = 24 * 60 * 60  # 24 hours
 # WeakValueDictionary so a key's lock is reclaimed once nothing is using
 # it, rather than growing forever for every distinct key ever seen by this
 # process.
-_sync_key_locks: "weakref.WeakValueDictionary[str, threading.RLock]" = weakref.WeakValueDictionary()
+_sync_key_locks: weakref.WeakValueDictionary[str, threading.RLock] = weakref.WeakValueDictionary()
 _sync_key_locks_guard = threading.Lock()
 
-_async_key_locks: "weakref.WeakValueDictionary[str, asyncio.Lock]" = weakref.WeakValueDictionary()
+_async_key_locks: weakref.WeakValueDictionary[str, asyncio.Lock] = weakref.WeakValueDictionary()
 _async_key_locks_guard = threading.Lock()
 
 
@@ -51,11 +53,11 @@ def _get_async_key_lock(storage_key: str) -> asyncio.Lock:
 
 def idempotent(
     *,
-    store: Optional[IdempotencyStore] = None,
+    store: IdempotencyStore | None = None,
     key_arg: str = "idempotency_key",
     ttl_seconds: int = _DEFAULT_TTL_SECONDS,
-    on_duplicate: Optional[Callable[[str, Any], None]] = None,
-    tracer: Optional[Tracer] = None,
+    on_duplicate: Callable[[str, Any], None] | None = None,
+    tracer: Tracer | None = None,
 ) -> Callable[[F], F]:
     """Make a tool function idempotent.
 
@@ -142,7 +144,7 @@ def idempotent(
     return decorator
 
 
-def _extract_key(kwargs: Dict[str, Any], key_arg: str) -> str:
+def _extract_key(kwargs: dict[str, Any], key_arg: str) -> str:
     if key_arg not in kwargs or kwargs[key_arg] is None:
         raise IdempotencyKeyMissingError(
             f"Missing required idempotency key argument '{key_arg}'. "
@@ -176,7 +178,7 @@ def _storage_key(func: Callable[..., Any], key: str) -> str:
     return f"{func.__module__}.{getattr(func, '__qualname__', func.__name__)}::{key}"
 
 
-def _lookup(store: IdempotencyStore, storage_key: str) -> Tuple[bool, Any]:
+def _lookup(store: IdempotencyStore, storage_key: str) -> tuple[bool, Any]:
     """Look up `storage_key`, distinguishing "no cached result" from "the
     cached result happens to be `None`" (or any other falsy value).
 

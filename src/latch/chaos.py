@@ -22,12 +22,14 @@ installed package) uses this module to compare a naive vs. a
 that's the intended end-to-end use case this module is scoped for.
 """
 
+from __future__ import annotations
+
 import asyncio
 import functools
 import inspect
 import random
 import time
-from typing import Any, Callable, Optional, Type, TypeVar
+from typing import Any, Callable, TypeVar
 
 F = TypeVar("F", bound=Callable[..., Any])
 
@@ -54,8 +56,8 @@ class Chaos:
         failure_rate: float = 0.0,
         latency_seconds: float = 0.0,
         latency_jitter_seconds: float = 0.0,
-        exception_type: Type[BaseException] = ChaosInjectedError,
-        seed: Optional[int] = None,
+        exception_type: type[BaseException] = ChaosInjectedError,
+        seed: int | None = None,
     ) -> None:
         if not 0.0 <= failure_rate <= 1.0:
             raise ValueError("failure_rate must be between 0.0 and 1.0")
@@ -93,12 +95,12 @@ class Chaos:
 
 def chaos(
     *,
-    injector: Optional[Chaos] = None,
+    injector: Chaos | None = None,
     failure_rate: float = 0.0,
     latency_seconds: float = 0.0,
     latency_jitter_seconds: float = 0.0,
-    exception_type: Type[BaseException] = ChaosInjectedError,
-    seed: Optional[int] = None,
+    exception_type: type[BaseException] = ChaosInjectedError,
+    seed: int | None = None,
 ) -> Callable[[F], F]:
     """Decorator form of `Chaos`.
 
@@ -156,4 +158,4 @@ def chaos(
     return decorator
 
 
-__all__ = ["Chaos", "chaos", "ChaosInjectedError"]
+__all__ = ["Chaos", "ChaosInjectedError", "chaos"]

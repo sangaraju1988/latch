@@ -29,8 +29,8 @@ redis = ["redis>=5.0"]
 dev = [
     "pytest>=7.0",
     "pytest-asyncio>=0.23",
-    "mypy>=1.8",
-    "ruff>=0.4",
+    "mypy==2.3.0",
+    "ruff==0.16.0",
     "fakeredis>=2.20",
     "langchain-core>=0.3",
 ]

@@ -118,7 +118,9 @@ def test_success_resets_failure_count():
 
 
 def test_unexpected_exception_type_not_counted():
-    breaker = CircuitBreaker(failure_threshold=1, recovery_timeout=10, expected_exception=ValueError)
+    breaker = CircuitBreaker(
+        failure_threshold=1, recovery_timeout=10, expected_exception=ValueError
+    )
 
     @circuit_breaker(breaker=breaker)
     def raises_type_error():

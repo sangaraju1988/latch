@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
-from typing import Any, Optional
+from typing import Any
 
 
 class IdempotencyStore(ABC):
@@ -10,7 +12,7 @@ class IdempotencyStore(ABC):
     """
 
     @abstractmethod
-    def get(self, key: str) -> Optional[Any]:
+    def get(self, key: str) -> Any | None:
         """Return the cached result for `key`, or None if not present
         or expired."""
         raise NotImplementedError

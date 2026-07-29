@@ -4,8 +4,8 @@ import pytest
 
 fakeredis = pytest.importorskip("fakeredis")
 
-from latch import idempotent  # noqa: E402
-from latch.stores.redis import RedisStore  # noqa: E402
+from latch import idempotent
+from latch.stores.redis import RedisStore
 
 
 @pytest.fixture
@@ -84,7 +84,6 @@ def test_idempotent_decorator_dedupes_none_returning_function_via_redis():
     @idempotent(store=store)
     def delete_record(record_id):
         calls.append(record_id)
-        return None
 
     r1 = delete_record(record_id="R1", idempotency_key="k1")
     r2 = delete_record(record_id="R1", idempotency_key="k1")

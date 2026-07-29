@@ -14,8 +14,10 @@ and CLAUDE.md "Packaging decision (v0.3 adapters)" for why this lives
 here as a module rather than a separate `latch-langchain` package.
 """
 
+from __future__ import annotations
+
 import inspect
-from typing import Any, Callable, Optional
+from typing import Any, Callable
 
 from latch.budget import BudgetGuardrail, budget_guardrail
 from latch.circuit_breaker import CircuitBreaker, circuit_breaker
@@ -27,11 +29,11 @@ from latch.timeout import with_timeout
 def resilient_tool(
     func: Callable[..., Any],
     *,
-    idempotency_store: Optional[IdempotencyStore] = None,
+    idempotency_store: IdempotencyStore | None = None,
     idempotency_ttl_seconds: int = 86400,
-    breaker: Optional[CircuitBreaker] = None,
-    timeout_seconds: Optional[float] = None,
-    guardrail: Optional[BudgetGuardrail] = None,
+    breaker: CircuitBreaker | None = None,
+    timeout_seconds: float | None = None,
+    guardrail: BudgetGuardrail | None = None,
 ) -> Callable[..., Any]:
     """Wrap `func` with whichever latch primitives are configured, in the
     same stacking order as `examples/resilient_tool_example.py`:

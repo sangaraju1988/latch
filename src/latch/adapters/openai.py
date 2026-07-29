@@ -17,8 +17,10 @@ dependency promise intact for this adapter too -- see
 adapters)".
 """
 
+from __future__ import annotations
+
 import json
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable
 
 ToolFunction = Callable[..., Any]
 
@@ -26,10 +28,10 @@ ToolFunction = Callable[..., Any]
 def dispatch_tool_call(
     tool_call: Any,
     *,
-    tools: Dict[str, ToolFunction],
-    run_id: Optional[str] = None,
+    tools: dict[str, ToolFunction],
+    run_id: str | None = None,
     pass_idempotency_key: bool = True,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Execute one OpenAI tool call and return an OpenAI-shaped tool
     response message.
 

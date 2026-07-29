@@ -14,11 +14,13 @@ limiter) — the goal is a hard ceiling an agent cannot blow through, not
 smooth traffic shaping.
 """
 
+from __future__ import annotations
+
 import functools
 import inspect
 import threading
 import time
-from typing import Any, Callable, Optional, TypeVar
+from typing import Any, Callable, TypeVar
 
 from latch.exceptions import BudgetExceededError
 from latch.tracing import Tracer
@@ -43,10 +45,10 @@ class BudgetGuardrail:
     def __init__(
         self,
         *,
-        max_calls: Optional[int] = None,
-        max_cost: Optional[float] = None,
-        window_seconds: Optional[float] = None,
-        tracer: Optional[Tracer] = None,
+        max_calls: int | None = None,
+        max_cost: float | None = None,
+        window_seconds: float | None = None,
+        tracer: Tracer | None = None,
     ) -> None:
         if max_calls is None and max_cost is None:
             raise ValueError("at least one of max_calls or max_cost must be set")
@@ -89,8 +91,7 @@ class BudgetGuardrail:
 
             if self.max_calls is not None and self._call_count + 1 > self.max_calls:
                 reason = (
-                    f"call count {self._call_count}/{self.max_calls} already used "
-                    f"in this window"
+                    f"call count {self._call_count}/{self.max_calls} already used in this window"
                 )
                 if self.tracer is not None:
                     self.tracer.emit("budget_guardrail", "budget_exceeded", reason=reason)
@@ -138,12 +139,12 @@ class BudgetGuardrail:
 
 def budget_guardrail(
     *,
-    guardrail: Optional[BudgetGuardrail] = None,
-    max_calls: Optional[int] = None,
-    max_cost: Optional[float] = None,
-    window_seconds: Optional[float] = None,
-    cost_fn: Optional[CostFn] = None,
-    tracer: Optional[Tracer] = None,
+    guardrail: BudgetGuardrail | None = None,
+    max_calls: int | None = None,
+    max_cost: float | None = None,
+    window_seconds: float | None = None,
+    cost_fn: CostFn | None = None,
+    tracer: Tracer | None = None,
 ) -> Callable[[F], F]:
     """Decorator form of `BudgetGuardrail`.
 
@@ -163,8 +164,12 @@ def budget_guardrail(
     `tracer` emits `call_recorded(call_count, total_cost, cost)` and
     `budget_exceeded(reason)` events (see `latch.tracing`).
     """
-    active_guardrail = guardrail if guardrail is not None else BudgetGuardrail(
-        max_calls=max_calls, max_cost=max_cost, window_seconds=window_seconds, tracer=tracer
+    active_guardrail = (
+        guardrail
+        if guardrail is not None
+        else BudgetGuardrail(
+            max_calls=max_calls, max_cost=max_cost, window_seconds=window_seconds, tracer=tracer
+        )
     )
 
     def decorator(func: F) -> F:

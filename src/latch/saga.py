@@ -38,9 +38,11 @@ Design notes
   actions/compensations; it also accepts plain sync callables mixed in.
 """
 
+from __future__ import annotations
+
 import inspect
 from dataclasses import dataclass
-from typing import Any, Callable, List, Optional, Tuple
+from typing import Any, Callable
 
 from latch.exceptions import SagaExecutionError
 from latch.tracing import Tracer
@@ -50,14 +52,14 @@ from latch.tracing import Tracer
 class SagaStep:
     name: str
     action: Callable[[], Any]
-    compensation: Optional[Callable[[Any], Any]] = None
+    compensation: Callable[[Any], Any] | None = None
 
 
 class _CompletedStep:
     """A step that finished executing, paired with the result its action
     produced -- the result is what gets handed to `compensation`."""
 
-    __slots__ = ("step", "result")
+    __slots__ = ("result", "step")
 
     def __init__(self, step: SagaStep, result: Any) -> None:
         self.step = step
@@ -81,18 +83,18 @@ class Saga:
     `saga_failed` events for every `run()`/`run_async()` call.
     """
 
-    def __init__(self, name: str = "saga", *, tracer: Optional[Tracer] = None) -> None:
+    def __init__(self, name: str = "saga", *, tracer: Tracer | None = None) -> None:
         self.name = name
         self.tracer = tracer
-        self._steps: List[SagaStep] = []
+        self._steps: list[SagaStep] = []
 
     def add_step(
         self,
         action: Callable[[], Any],
         *,
-        compensation: Optional[Callable[[Any], Any]] = None,
-        name: Optional[str] = None,
-    ) -> "Saga":
+        compensation: Callable[[Any], Any] | None = None,
+        name: str | None = None,
+    ) -> Saga:
         """Register a step. Returns `self` so calls can be chained."""
         step_name = name or str(getattr(action, "__name__", f"step_{len(self._steps)}"))
         self._steps.append(SagaStep(name=step_name, action=action, compensation=compensation))
@@ -101,8 +103,8 @@ class Saga:
     def step(
         self,
         *,
-        compensation: Optional[Callable[[Any], Any]] = None,
-        name: Optional[str] = None,
+        compensation: Callable[[Any], Any] | None = None,
+        name: str | None = None,
     ) -> Callable[[Callable[[], Any]], Callable[[], Any]]:
         """Decorator form of `add_step`.
 
@@ -126,10 +128,10 @@ class Saga:
         return decorator
 
     @property
-    def steps(self) -> Tuple[SagaStep, ...]:
+    def steps(self) -> tuple[SagaStep, ...]:
         return tuple(self._steps)
 
-    def run(self) -> List[Any]:
+    def run(self) -> list[Any]:
         """Execute all steps in order (sync).
 
         Raises `TypeError` immediately, before running anything, if any
@@ -142,8 +144,8 @@ class Saga:
         """
         self._reject_async_steps()
 
-        results: List[Any] = []
-        completed: List[_CompletedStep] = []
+        results: list[Any] = []
+        completed: list[_CompletedStep] = []
 
         for step in self._steps:
             self._emit("step_started", step=step.name)
@@ -167,15 +169,15 @@ class Saga:
         self._emit("saga_succeeded")
         return results
 
-    async def run_async(self) -> List[Any]:
+    async def run_async(self) -> list[Any]:
         """Execute all steps in order (async).
 
         Each step's action/compensation may be a regular function or a
         coroutine function; coroutine functions are awaited, regular
         functions are called directly. Rollback semantics match `run()`.
         """
-        results: List[Any] = []
-        completed: List[_CompletedStep] = []
+        results: list[Any] = []
+        completed: list[_CompletedStep] = []
 
         for step in self._steps:
             self._emit("step_started", step=step.name)
@@ -214,10 +216,10 @@ class Saga:
             self.tracer.emit("saga", event, **metadata)
 
     def _compensate_sync(
-        self, completed: List[_CompletedStep]
-    ) -> Tuple[List[str], List[Tuple[str, BaseException]]]:
-        compensated: List[str] = []
-        errors: List[Tuple[str, BaseException]] = []
+        self, completed: list[_CompletedStep]
+    ) -> tuple[list[str], list[tuple[str, BaseException]]]:
+        compensated: list[str] = []
+        errors: list[tuple[str, BaseException]] = []
         for entry in reversed(completed):
             if entry.step.compensation is None:
                 continue
@@ -233,10 +235,10 @@ class Saga:
         return compensated, errors
 
     async def _compensate_async(
-        self, completed: List[_CompletedStep]
-    ) -> Tuple[List[str], List[Tuple[str, BaseException]]]:
-        compensated: List[str] = []
-        errors: List[Tuple[str, BaseException]] = []
+        self, completed: list[_CompletedStep]
+    ) -> tuple[list[str], list[tuple[str, BaseException]]]:
+        compensated: list[str] = []
+        errors: list[tuple[str, BaseException]] = []
         for entry in reversed(completed):
             compensation = entry.step.compensation
             if compensation is None:

@@ -25,12 +25,14 @@ breaker protects against retry storms across *many* operations hitting a
 failing dependency) but neither requires the other.
 """
 
+from __future__ import annotations
+
 import functools
 import inspect
 import threading
 import time
 from enum import Enum
-from typing import Any, Callable, Optional, Type, TypeVar
+from typing import Any, Callable, TypeVar
 
 from latch.exceptions import CircuitOpenError
 from latch.tracing import Tracer
@@ -58,8 +60,8 @@ class CircuitBreaker:
         *,
         failure_threshold: int = 5,
         recovery_timeout: float = 30.0,
-        expected_exception: Type[BaseException] = Exception,
-        tracer: Optional[Tracer] = None,
+        expected_exception: type[BaseException] = Exception,
+        tracer: Tracer | None = None,
     ) -> None:
         if failure_threshold < 1:
             raise ValueError("failure_threshold must be >= 1")
@@ -73,7 +75,7 @@ class CircuitBreaker:
 
         self._state = CircuitState.CLOSED
         self._failure_count = 0
-        self._opened_at: Optional[float] = None
+        self._opened_at: float | None = None
         self._half_open_trial_in_flight = False
         self._lock = threading.Lock()
 
@@ -84,10 +86,13 @@ class CircuitBreaker:
 
     def _resolve_state(self) -> CircuitState:
         """Must be called while holding `self._lock`."""
-        if self._state is CircuitState.OPEN and self._opened_at is not None:
-            if time.monotonic() - self._opened_at >= self.recovery_timeout:
-                self._state = CircuitState.HALF_OPEN
-                self._emit_state_changed(CircuitState.OPEN, CircuitState.HALF_OPEN)
+        if (
+            self._state is CircuitState.OPEN
+            and self._opened_at is not None
+            and time.monotonic() - self._opened_at >= self.recovery_timeout
+        ):
+            self._state = CircuitState.HALF_OPEN
+            self._emit_state_changed(CircuitState.OPEN, CircuitState.HALF_OPEN)
         return self._state
 
     def _emit_state_changed(self, from_state: CircuitState, to_state: CircuitState) -> None:
@@ -219,11 +224,11 @@ class CircuitBreaker:
 
 def circuit_breaker(
     *,
-    breaker: Optional[CircuitBreaker] = None,
+    breaker: CircuitBreaker | None = None,
     failure_threshold: int = 5,
     recovery_timeout: float = 30.0,
-    expected_exception: Type[BaseException] = Exception,
-    tracer: Optional[Tracer] = None,
+    expected_exception: type[BaseException] = Exception,
+    tracer: Tracer | None = None,
 ) -> Callable[[F], F]:
     """Decorator form of `CircuitBreaker`.
 
@@ -238,11 +243,15 @@ def circuit_breaker(
     `call_rejected`, `call_succeeded`, and `call_failed(exception)`
     events (see `latch.tracing`).
     """
-    active_breaker = breaker if breaker is not None else CircuitBreaker(
-        failure_threshold=failure_threshold,
-        recovery_timeout=recovery_timeout,
-        expected_exception=expected_exception,
-        tracer=tracer,
+    active_breaker = (
+        breaker
+        if breaker is not None
+        else CircuitBreaker(
+            failure_threshold=failure_threshold,
+            recovery_timeout=recovery_timeout,
+            expected_exception=expected_exception,
+            tracer=tracer,
+        )
     )
 
     def decorator(func: F) -> F:

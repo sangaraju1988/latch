@@ -1,6 +1,8 @@
+from __future__ import annotations
+
 import threading
 import time
-from typing import Any, Dict, Optional, Tuple
+from typing import Any
 
 from latch.stores.base import IdempotencyStore
 
@@ -15,10 +17,10 @@ class InMemoryStore(IdempotencyStore):
     """
 
     def __init__(self) -> None:
-        self._data: Dict[str, Tuple[Any, float]] = {}
+        self._data: dict[str, tuple[Any, float]] = {}
         self._lock = threading.Lock()
 
-    def get(self, key: str) -> Optional[Any]:
+    def get(self, key: str) -> Any | None:
         entry = self._valid_entry(key)
         return entry[0] if entry is not None else None
 
@@ -29,7 +31,7 @@ class InMemoryStore(IdempotencyStore):
     def exists(self, key: str) -> bool:
         return self._valid_entry(key) is not None
 
-    def _valid_entry(self, key: str) -> Optional[Tuple[Any, float]]:
+    def _valid_entry(self, key: str) -> tuple[Any, float] | None:
         """Return `(value, expires_at)` if `key` is present and not
         expired, or `None` otherwise -- shared by `get()` and `exists()`
         so they can never disagree about whether a key is present. `get()`

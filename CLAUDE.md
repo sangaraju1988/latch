@@ -172,6 +172,25 @@ Key behaviors:
 - Every new feature: implementation + tests + README update in the same commit/PR.
 - Run `pytest` before considering any task complete.
 
+**Pin `ruff` and `mypy` exactly in the `dev` extra — don't leave them as `>=` ranges.**
+On 2026-07-29, CI failed on `main` (unrelated to any feature change) because
+`ruff>=0.4` let a fresh `pip install -e ".[dev]"` pick up ruff 0.16.0, whose
+expanded default rule set flagged 100 pre-existing findings in `src/latch/`
+and `tests/` that ruff 0.15.x (the version actually verified clean at every
+prior release) never flagged — unsorted `__all__`, missing
+`from __future__ import annotations`, `typing.Dict/List/Tuple/Type` instead
+of the builtin generics, one nested-`if` (`SIM102`), one bare
+`except Exception: continue` needing an explicit `noqa` alongside its
+existing documented-rationale comment (`S112`, `tracing.py`'s deliberately
+broad subscriber-exception swallow — see the tracing note above). None of
+this was a real bug; it was a linter goalpost moving under an unpinned
+version range. Fixed by pinning `ruff==0.16.0` and `mypy==2.3.0` (both
+verified clean against this codebase on that date) instead of `>=` ranges,
+same rationale as the pre-existing "mypy environment note" under v0.2's
+Definition of done. Re-verify with a fresh, non-editable install before
+bumping either pin in the future — that's exactly the check that would have
+caught this before it reached CI.
+
 ## Definition of done for v0.1 (met)
 
 1. `pytest` passes with tests covering: sync dedup, async dedup, different-key re-execution, missing-key error, TTL expiry.

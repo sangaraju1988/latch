@@ -109,7 +109,6 @@ def test_none_returning_function_still_dedupes():
     @idempotent(store=store)
     def delete_record(record_id, idempotency_key=None):
         calls.append(record_id)
-        return None
 
     r1 = delete_record(record_id="R1", idempotency_key="k1")
     r2 = delete_record(record_id="R1", idempotency_key="k1")

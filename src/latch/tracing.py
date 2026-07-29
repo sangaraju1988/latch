@@ -51,7 +51,7 @@ import logging
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List
+from typing import Any, Callable
 
 TraceCallback = Callable[["TraceEvent"], None]
 
@@ -71,7 +71,7 @@ class TraceEvent:
     primitive: str
     event: str
     timestamp: float = field(default_factory=time.time)
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 class Tracer:
@@ -88,7 +88,7 @@ class Tracer:
     """
 
     def __init__(self) -> None:
-        self._subscribers: List[TraceCallback] = []
+        self._subscribers: list[TraceCallback] = []
         self._lock = threading.Lock()
 
     def subscribe(self, callback: TraceCallback) -> None:
@@ -107,7 +107,7 @@ class Tracer:
         for callback in subscribers:
             try:
                 callback(trace_event)
-            except Exception:  # noqa: BLE001 -- deliberately broad, see class docstring
+            except Exception:  # noqa: BLE001, S112 -- deliberately broad, see class docstring
                 continue
 
 
@@ -138,4 +138,4 @@ class LoggingTracer(Tracer):
         )
 
 
-__all__ = ["TraceEvent", "Tracer", "LoggingTracer"]
+__all__ = ["LoggingTracer", "TraceEvent", "Tracer"]

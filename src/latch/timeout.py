@@ -20,12 +20,14 @@ what the caller was willing to wait, tying up the agent loop.
   surprise.
 """
 
+from __future__ import annotations
+
 import asyncio
 import functools
 import inspect
 import threading
 import time
-from typing import Any, Callable, Optional, TypeVar
+from typing import Any, Callable, TypeVar
 
 from latch.exceptions import LatchTimeoutError
 from latch.tracing import Tracer
@@ -33,7 +35,7 @@ from latch.tracing import Tracer
 F = TypeVar("F", bound=Callable[..., Any])
 
 
-def with_timeout(*, seconds: float, tracer: Optional[Tracer] = None) -> Callable[[F], F]:
+def with_timeout(*, seconds: float, tracer: Tracer | None = None) -> Callable[[F], F]:
     """Enforce a wall-clock deadline on a tool call.
 
     Raises `LatchTimeoutError` if the wrapped function does not complete
@@ -69,8 +71,8 @@ def with_timeout(*, seconds: float, tracer: Optional[Tracer] = None) -> Callable
 
         @functools.wraps(func)
         def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
-            result_box: "list[Any]" = []
-            error_box: "list[BaseException]" = []
+            result_box: list[Any] = []
+            error_box: list[BaseException] = []
 
             def target() -> None:
                 try:

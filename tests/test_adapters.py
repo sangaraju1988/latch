@@ -178,8 +178,9 @@ class TestLangChainAdapter:
         examples/langchain_adapter_example.py) to make sure the patch
         survives every layer of wrapping, not just idempotency alone."""
         pytest.importorskip("langchain_core")
-        from latch import BudgetGuardrail, CircuitBreaker
         from langchain_core.tools import StructuredTool
+
+        from latch import BudgetGuardrail, CircuitBreaker
 
         store = InMemoryStore()
 
