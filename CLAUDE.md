@@ -184,12 +184,27 @@ of the builtin generics, one nested-`if` (`SIM102`), one bare
 existing documented-rationale comment (`S112`, `tracing.py`'s deliberately
 broad subscriber-exception swallow — see the tracing note above). None of
 this was a real bug; it was a linter goalpost moving under an unpinned
-version range. Fixed by pinning `ruff==0.16.0` and `mypy==2.3.0` (both
+version range. Fixed by pinning `ruff==0.16.0` and `mypy==1.19.1` (both
 verified clean against this codebase on that date) instead of `>=` ranges,
 same rationale as the pre-existing "mypy environment note" under v0.2's
 Definition of done. Re-verify with a fresh, non-editable install before
 bumping either pin in the future — that's exactly the check that would have
 caught this before it reached CI.
+
+**Follow-up the same day:** the first attempt at this fix pinned
+`mypy==2.3.0`, which was clean under the Python 3.10 environment it was
+verified in, but mypy dropped Python 3.9 support as of 2.0.0 — so
+`pip install -e ".[dev]"` failed outright on the CI matrix's Python 3.9 job
+(pip couldn't find any 3.9-compatible distribution for `mypy==2.3.0`,
+failing at the install step, before lint/type-check/test ever ran).
+Re-pinned to `mypy==1.19.1` (the newest 1.x release, still
+Python-3.9-compatible, confirmed via
+`pip download --python-version 3.9 --only-binary=:all:`) and re-verified
+clean. The lesson generalizes: whenever `requires-python` spans more than
+one minor version, a version pin for a dev tool must be checked against
+the *oldest* supported interpreter, not just whichever interpreter happens
+to be on hand locally — this local sandbox only had Python 3.10 available,
+which is exactly how the 2.3.0 mistake slipped through the first time.
 
 ## Definition of done for v0.1 (met)
 
